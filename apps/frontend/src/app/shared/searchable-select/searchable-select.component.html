@@ -1,0 +1,74 @@
+<!-- Trigger -->
+<div class="ss-trigger"
+  [class.ss-open]="isOpen"
+  [class.ss-filled]="value"
+  [class.ss-disabled]="disabled"
+  #triggerEl
+  (click)="toggle(triggerEl)">
+
+  <span class="ss-label" [class.ss-label--empty]="!value">
+    {{ value || placeholder }}
+  </span>
+
+  <button *ngIf="value" class="ss-clear-btn" (click)="clear($event)" tabindex="-1">
+    <mat-icon>close</mat-icon>
+  </button>
+  <mat-icon class="ss-arrow" [class.ss-arrow--up]="isOpen">keyboard_arrow_down</mat-icon>
+</div>
+
+<!-- Floating panel -->
+<div *ngIf="isOpen" class="ss-panel"
+  [style.top.px]="panelTop"
+  [style.left.px]="panelLeft"
+  [style.width.px]="panelWidth">
+
+  <!-- Search -->
+  <div class="ss-search-row">
+    <mat-icon class="ss-search-ico">search</mat-icon>
+    <input class="ss-search-input"
+      [(ngModel)]="query"
+      [placeholder]="searchPlaceholder"
+      autocomplete="off" spellcheck="false"
+      (click)="$event.stopPropagation()">
+    <button *ngIf="query" class="ss-search-x" (click)="clearSearch($event)">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <!-- List -->
+  <div class="ss-list">
+
+    <!-- Empty state -->
+    <div *ngIf="totalResults === 0 && query" class="ss-empty">
+      <mat-icon>manage_search</mat-icon>
+      <span>Sem resultados para <strong>"{{ query }}"</strong></span>
+    </div>
+
+    <!-- Clear option -->
+    <button *ngIf="!query && value" class="ss-clear-opt"
+      (click)="select(''); $event.stopPropagation()">
+      <mat-icon>remove_circle_outline</mat-icon>
+      Limpar seleção
+    </button>
+
+    <!-- Groups + Options — all pre-computed, no functions in bindings -->
+    <ng-container *ngFor="let group of renderedGroups">
+      <div class="ss-group-hdr">
+        <span class="ss-group-dot"></span>
+        {{ group.label }}
+      </div>
+      <button *ngFor="let opt of group.options"
+        class="ss-opt"
+        [class.ss-opt--active]="value === opt.text"
+        (click)="select(opt.text); $event.stopPropagation()">
+        <span class="ss-opt-text">
+          <ng-container *ngFor="let p of opt.parts">
+            <mark *ngIf="p.m">{{ p.t }}</mark><ng-container *ngIf="!p.m">{{ p.t }}</ng-container>
+          </ng-container>
+        </span>
+        <mat-icon *ngIf="value === opt.text" class="ss-opt-check">check</mat-icon>
+      </button>
+    </ng-container>
+
+  </div>
+</div>

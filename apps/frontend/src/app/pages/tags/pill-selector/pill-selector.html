@@ -1,0 +1,16 @@
+<div class="pill-selector">
+  @for (g of groups; track g.id) {
+    <span
+      class="pill"
+      [class.pill--active]="isActive(g.id)"
+      (click)="toggle(g.id)"
+      [title]="g.descricao || g.nome"
+    >
+      {{ g.nome }}
+    </span>
+  }
+
+  @if (!groups.length) {
+    <span class="pill-empty">Nenhum grupo disponível</span>
+  }
+</div>

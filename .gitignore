@@ -1,0 +1,55 @@
+# Dependências
+node_modules/
+
+# Builds / saídas compiladas
+dist/
+apps/electron/frontend/
+out/
+*.tsbuildinfo
+
+# Instaladores e binários
+*.exe
+*.rar
+*.zip
+*.7z
+*.msi
+*.nsis
+
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+apps/backend/data/suprides/connection-settings.json
+apps/backend/data/erp-db-config.json
+
+# Dados locais / base de dados / cache
+apps/backend/data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqbpro
+
+# Ficheiros temporários e logs
+*.log
+*.tmp
+*.bak
+haegerstock_tmp.xlsx
+
+# Sistema operativo / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Snapshots da loja, planos do dry-run e configs locais
+**/snapshots/
+**/plans/
+*.local.json
+__pycache__/
+*.pyc
+
+# Referências locais (não vão para o repo)
+Dashboard.jsx
+apps/*.png
+.claude/

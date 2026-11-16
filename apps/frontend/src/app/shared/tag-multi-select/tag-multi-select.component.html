@@ -1,0 +1,46 @@
+<!-- Field -->
+<div class="tms-field" #fieldEl (click)="toggle(fieldEl)" [class.tms-field--open]="isOpen">
+  <div class="tms-chips-wrap">
+    <span class="tms-chip" *ngFor="let tag of value">
+      <span class="tms-chip-text">{{ tag }}</span>
+      <button class="tms-chip-x" (click)="remove(tag, $event)">
+        <mat-icon>close</mat-icon>
+      </button>
+    </span>
+    <input class="tms-input"
+      [(ngModel)]="query"
+      [placeholder]="value.length === 0 ? placeholder : ''"
+      (click)="$event.stopPropagation(); open(fieldEl)"
+      (keydown.enter)="onEnter($event)"
+      autocomplete="off" spellcheck="false">
+  </div>
+  <button *ngIf="value.length > 0" class="tms-clear-all" (click)="clearAll($event)" tabindex="-1">
+    <mat-icon>close</mat-icon>
+  </button>
+  <mat-icon class="tms-arrow" [class.tms-arrow--up]="isOpen">keyboard_arrow_down</mat-icon>
+</div>
+
+<!-- Floating panel -->
+<div *ngIf="isOpen" class="tms-panel"
+  [style.top.px]="panelTop"
+  [style.left.px]="panelLeft"
+  [style.min-width.px]="panelWidth">
+
+  <div class="tms-list">
+    <div class="tms-empty" *ngIf="filteredOptions.length === 0 && !query">
+      <mat-icon>check_circle_outline</mat-icon>
+      <span>Todas as opções adicionadas</span>
+    </div>
+    <div class="tms-empty tms-empty--force" *ngIf="filteredOptions.length === 0 && query">
+      <mat-icon>manage_search</mat-icon>
+      <span>Sem resultados</span>
+      <button class="tms-force-add" (click)="tryAddItem.emit(query); $event.stopPropagation()">
+        <mat-icon>add</mat-icon> Forçar adição
+      </button>
+    </div>
+    <button *ngFor="let opt of filteredOptions" class="tms-opt" (click)="add(opt, $event)">
+      <mat-icon class="tms-opt-add">add</mat-icon>
+      <span class="tms-opt-text">{{ opt }}</span>
+    </button>
+  </div>
+</div>

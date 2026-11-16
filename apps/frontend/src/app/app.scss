@@ -1,0 +1,19 @@
+.app-toolbar {
+  display: flex;
+  justify-content: space-between;
+  background: #263238; // cinza escuro moderno
+  color: white;
+}
+
+.logo {
+  font-weight: bold;
+  font-size: 20px;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.app-container {
+  padding: 20px;
+}

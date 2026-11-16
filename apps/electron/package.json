@@ -1,0 +1,47 @@
+{
+  "name": "megadigital-electron",
+  "version": "1.0.0",
+  "description": "App desktop MegaDigital (Electron + Angular)",
+  "main": "main.js",
+  "author": "ActiveLink",
+  "scripts": {
+    "dev": "cross-env ELECTRON_START_URL=http://localhost:4200 electron .",
+    "start": "electron .",
+    "clean": "node -e \"const fs=require('fs'); if(fs.existsSync('frontend')) fs.rmSync('frontend',{recursive:true});\"",
+    "copy:frontend": "robocopy ..\\frontend\\dist\\frontend\\browser .\\frontend\\browser /MIR >NUL || exit 0",
+    "build": "npm run clean && pushd ..\\frontend && ng build --configuration production && popd && npm run copy:frontend && electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "cross-env": "^10.0.0",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-reload": "^2.0.0-alpha.1"
+  },
+  "build": {
+    "appId": "com.activelink.megadigital",
+    "productName": "MegaDigital",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "frontend/browser",
+        "to": "frontend/browser"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "MegaDigital"
+    }
+  }
+}

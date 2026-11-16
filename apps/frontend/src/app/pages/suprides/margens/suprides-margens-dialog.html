@@ -1,0 +1,160 @@
+<div style="display:flex;flex-direction:column;height:100%;background:#fff;overflow:hidden;font-family:'Poppins','Segoe UI',sans-serif;">
+
+  <!-- HEADER -->
+  <div class="sm-header">
+    <mat-icon class="sm-icon">percent</mat-icon>
+    <span class="sm-title">Margens de Preço · {{ activeSupplierLabel }}</span>
+    <div class="sm-header-right">
+      <button mat-icon-button matTooltip="Expandir tudo" (click)="expandAll()">
+        <mat-icon>unfold_more</mat-icon>
+      </button>
+      <button mat-icon-button matTooltip="Colapsar tudo" (click)="collapseAll()">
+        <mat-icon>unfold_less</mat-icon>
+      </button>
+      <button mat-icon-button matTooltip="Fechar" (click)="close()">
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <div class="sm-loading" *ngIf="loading">
+    <mat-progress-bar mode="indeterminate" color="primary"></mat-progress-bar>
+    <span>A carregar menu Shopify…</span>
+  </div>
+
+  <div class="sm-body" *ngIf="!loading">
+    <mat-tab-group class="supplier-tabs" [selectedIndex]="supplierIndex" (selectedIndexChange)="onSupplierTabChange($event)" animationDuration="120ms">
+      <mat-tab label="Suprides"></mat-tab>
+      <mat-tab label="Esprinet"></mat-tab>
+    </mat-tab-group>
+
+    <div class="sm-settings-row">
+      <div class="sm-setting">
+        <label>Taxa IVA</label>
+        <mat-select [(ngModel)]="adminSettings.ivaRate" class="iva-select">
+          <mat-option *ngFor="let v of [0, 6, 13, 23]" [value]="v">{{ v }}%</mat-option>
+        </mat-select>
+      </div>
+      <div class="sm-setting sm-setting--info">
+        <label>Arredondamento</label>
+        <span class="rounding-rules">
+          &lt; 50€ → X<strong>.49</strong> / X<strong>.99</strong> &nbsp;·&nbsp; ≥ 50€ → X<strong>.90</strong>
+        </span>
+      </div>
+    </div>
+
+    <div class="sm-legend">
+      <span class="legend-item line">Linha (L1)</span>
+      <span class="legend-item family">Família (L2)</span>
+      <span class="legend-item subfamily" *ngIf="!isEsprinet">Subfamília (L3)</span>
+      <span class="legend-hint">Herança: Subfamília › Família › Linha · override tem precedência</span>
+    </div>
+
+    <div class="sm-tree">
+
+      <div class="tree-node line" *ngFor="let line of tree">
+        <div class="node-row" (click)="toggle(line)">
+          <mat-icon class="expand-icon">{{ line.expanded ? 'expand_more' : 'chevron_right' }}</mat-icon>
+          <mat-icon class="type-icon">shopping_bag</mat-icon>
+          <span class="node-name">{{ line.title }}</span>
+          <div class="node-controls" (click)="$event.stopPropagation()">
+            <mat-select [(ngModel)]="line.mode" class="mode-sel"
+              [disabled]="line.marginValue === null"
+              (ngModelChange)="onModeChange(line)">
+              <mat-option *ngFor="let m of modeOptions" [value]="m.value">{{ m.label }}</mat-option>
+            </mat-select>
+            <div class="val-wrap" [class.is-inherited]="line.marginValue === null">
+              <input type="number"
+                [value]="line.marginValue !== null ? line.marginValue : ''"
+                [placeholder]="getPlaceholder(line)"
+                (change)="setMargin(line, $event)"
+                min="0" step="0.1" class="val-input">
+              <span class="val-suffix">{{ getSuffix(line) }}</span>
+              <button *ngIf="line.marginValue !== null" class="val-clear"
+                (mousedown)="$event.preventDefault()" (click)="clearMargin(line)"
+                matTooltip="Remover override">×</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tree-children" *ngIf="line.expanded">
+          <div class="tree-node family" *ngFor="let fam of line.children">
+            <div class="node-row" (click)="toggle(fam)">
+              <mat-icon class="expand-icon">{{ fam.expanded ? 'expand_more' : 'chevron_right' }}</mat-icon>
+              <mat-icon class="type-icon">shopping_bag</mat-icon>
+              <span class="node-name">{{ fam.title }}</span>
+              <div class="node-controls" (click)="$event.stopPropagation()">
+                <mat-select [(ngModel)]="fam.mode" class="mode-sel"
+                  [disabled]="fam.marginValue === null"
+                  (ngModelChange)="onModeChange(fam)">
+                  <mat-option *ngFor="let m of modeOptions" [value]="m.value">{{ m.label }}</mat-option>
+                </mat-select>
+                <div class="val-wrap" [class.is-inherited]="fam.marginValue === null">
+                  <input type="number"
+                    [value]="fam.marginValue !== null ? fam.marginValue : ''"
+                    [placeholder]="getPlaceholder(fam)"
+                    (change)="setMargin(fam, $event)"
+                    min="0" step="0.1" class="val-input">
+                  <span class="val-suffix">{{ getSuffix(fam) }}</span>
+                  <button *ngIf="fam.marginValue !== null" class="val-clear"
+                    (mousedown)="$event.preventDefault()" (click)="clearMargin(fam)"
+                    matTooltip="Remover override">×</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="tree-children" *ngIf="fam.expanded && !isEsprinet">
+              <div class="tree-node subfamily" *ngFor="let sub of fam.children">
+                <div class="node-row">
+                  <span class="expand-spacer"></span>
+                  <mat-icon class="type-icon">shopping_bag</mat-icon>
+                  <span class="node-name">{{ sub.title }}</span>
+                  <div class="node-controls">
+                    <mat-select [(ngModel)]="sub.mode" class="mode-sel"
+                      [disabled]="sub.marginValue === null"
+                      (ngModelChange)="onModeChange(sub)">
+                      <mat-option *ngFor="let m of modeOptions" [value]="m.value">{{ m.label }}</mat-option>
+                    </mat-select>
+                    <div class="val-wrap" [class.is-inherited]="sub.marginValue === null">
+                      <input type="number"
+                        [value]="sub.marginValue !== null ? sub.marginValue : ''"
+                        [placeholder]="getPlaceholder(sub)"
+                        (change)="setMargin(sub, $event)"
+                        min="0" step="0.1" class="val-input">
+                      <span class="val-suffix">{{ getSuffix(sub) }}</span>
+                      <button *ngIf="sub.marginValue !== null" class="val-clear"
+                        (mousedown)="$event.preventDefault()" (click)="clearMargin(sub)"
+                        matTooltip="Remover override">×</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="no-sub" *ngIf="fam.children.length === 0">Sem subcoleções</div>
+            </div>
+          </div>
+          <div class="no-sub" *ngIf="line.children.length === 0">Sem coleções dentro desta linha</div>
+        </div>
+      </div>
+
+      <div class="empty-tree" *ngIf="tree.length === 0">
+        <mat-icon>info_outline</mat-icon>
+        <span>Sem estrutura de menu Shopify.<br>Configure o menu no separador Mapeamento primeiro.</span>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="sm-footer" *ngIf="!loading">
+    <span class="success-msg" *ngIf="success">
+      <mat-icon>check_circle</mat-icon> Guardado com sucesso
+    </span>
+    <span class="error-msg" *ngIf="error && !success">{{ error }}</span>
+    <div style="flex:1"></div>
+    <button mat-button (click)="close()" style="color:#4b5563;font-weight:600">Cancelar</button>
+    <button mat-raised-button (click)="save()" [disabled]="saving" class="save-btn">
+      <mat-icon>save</mat-icon>
+      {{ saving ? 'A guardar…' : 'Guardar margens' }}
+    </button>
+  </div>
+
+</div>

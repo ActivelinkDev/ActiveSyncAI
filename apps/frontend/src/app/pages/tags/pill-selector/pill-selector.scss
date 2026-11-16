@@ -1,0 +1,49 @@
+// pill-selector.scss
+.pill-selector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+
+  // Inactive state — muted, outlined
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1.5px solid #cbd5e1;
+
+  &:hover {
+    background: #e2e8f0;
+    color: #475569;
+    transform: scale(1.04);
+  }
+
+  // Active state — vibrant, filled
+  &--active {
+    background: #1e3a5f;
+    color: #ffffff;
+    border-color: #1e3a5f;
+
+    &:hover {
+      background: #2d5282;
+      border-color: #2d5282;
+    }
+  }
+}
+
+.pill-empty {
+  font-size: 13px;
+  color: #94a3b8;
+  font-style: italic;
+  padding: 4px 0;
+}

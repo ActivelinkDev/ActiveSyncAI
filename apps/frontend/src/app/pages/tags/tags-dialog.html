@@ -1,0 +1,873 @@
+<!-- TAGS DIALOG -->
+
+<div class="td-header">
+  <div class="td-header-title">
+    <mat-icon class="td-header-icon">label</mat-icon>
+    <h2>Filtros / Tags · {{ activeSupplierLabel }}</h2>
+  </div>
+  <div class="td-header-actions">
+    <!-- AI Populate — Grupo (tab 1) -->
+      <button class="td-btn-normalize-tags" mat-menu-item (click)="normalizarTags()">
+        <mat-icon>auto_fix_high</mat-icon><span>Normalizacao de tags</span>
+      </button>
+      
+    @if (currentTabIndex === 1 && selectedGrupo) {
+      @if (aiPopulatingGrupo && aiProgressGrupo) {
+        <div class="td-ai-progress-wrap">
+          <div class="td-ai-progress-bar">
+            <div class="td-ai-progress-fill" [style.width.%]="(aiProgressGrupo.current / aiProgressGrupo.total) * 100"></div>
+          </div>
+          <div class="td-ai-progress-bottom">
+            <mat-icon class="td-ai-icon td-ai-icon--spin">auto_awesome</mat-icon>
+            <span class="td-ai-progress-count">{{ aiProgressGrupo.current }}/{{ aiProgressGrupo.total }}</span>
+            <span class="td-ai-progress-ref">{{ aiProgressGrupo.ref }}</span>
+            <span class="td-ai-eta-badge">{{ calcEta(aiProgressGrupo.current, aiProgressGrupo.total, aiStartTimeGrupo) }}</span>
+            <button class="td-ai-cancel-btn" (click)="cancelAiPopulateGrupo()" matTooltip="Cancelar">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+        </div>
+      } @else {
+        <button class="td-btn-ai-populate"
+                (click)="aiPopulateGrupoBtn()"
+                [disabled]="aiPopulatingGrupo"
+                matTooltip="Preencher todos os produtos deste grupo com IA"
+                matTooltipPosition="below">
+          <mat-icon class="td-ai-icon">auto_awesome</mat-icon>
+          <span>AI Populate</span>
+        </button>
+      }
+    }
+    <!-- AI Populate — Família (tab 2) -->
+    @if (currentTabIndex === 2 && selectedFamilia) {
+      @if (aiPopulatingFamilia && aiProgressFamilia) {
+        <div class="td-ai-progress-wrap">
+          <div class="td-ai-progress-bar">
+            <div class="td-ai-progress-fill" [style.width.%]="(aiProgressFamilia.current / aiProgressFamilia.total) * 100"></div>
+          </div>
+          <div class="td-ai-progress-bottom">
+            <mat-icon class="td-ai-icon td-ai-icon--spin">auto_awesome</mat-icon>
+            <span class="td-ai-progress-count">{{ aiProgressFamilia.current }}/{{ aiProgressFamilia.total }}</span>
+            <span class="td-ai-progress-ref">{{ aiProgressFamilia.ref }}</span>
+            <span class="td-ai-eta-badge">{{ calcEta(aiProgressFamilia.current, aiProgressFamilia.total, aiStartTimeFamilia) }}</span>
+            <button class="td-ai-cancel-btn" (click)="cancelAiPopulateFamilia()" matTooltip="Cancelar">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+        </div>
+      } @else {
+        <button class="td-btn-ai-populate"
+                (click)="aiPopulateFamiliaBtn()"
+                [disabled]="aiPopulatingFamilia"
+                matTooltip="Preencher todos os produtos desta família com IA"
+                matTooltipPosition="below">
+          <mat-icon class="td-ai-icon">auto_awesome</mat-icon>
+          <span>AI Populate</span>
+        </button>
+      }
+    }
+    <!-- AI Populate — Subfamília (tab 3) -->
+    @if (currentTabIndex === 3 && selectedSubfamilia) {
+      @if (aiPopulating && aiProgress) {
+        <div class="td-ai-progress-wrap">
+          <div class="td-ai-progress-bar">
+            <div class="td-ai-progress-fill" [style.width.%]="(aiProgress.current / aiProgress.total) * 100"></div>
+          </div>
+          <div class="td-ai-progress-bottom">
+            <mat-icon class="td-ai-icon td-ai-icon--spin">auto_awesome</mat-icon>
+            <span class="td-ai-progress-count">{{ aiProgress.current }}/{{ aiProgress.total }}</span>
+            <span class="td-ai-progress-ref">{{ aiProgress.ref }}</span>
+            <span class="td-ai-eta-badge">{{ calcEta(aiProgress.current, aiProgress.total, aiStartTime) }}</span>
+            <button class="td-ai-cancel-btn" (click)="cancelAiPopulate()" matTooltip="Cancelar">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+        </div>
+      } @else {
+        <button class="td-btn-ai-populate"
+                (click)="aiPopulateSubfamilia()"
+                [disabled]="aiPopulating"
+                matTooltip="Preencher todos os produtos desta subfamília com IA"
+                matTooltipPosition="below">
+          <mat-icon class="td-ai-icon">auto_awesome</mat-icon>
+          <span>AI Populate</span>
+        </button>
+      }
+    }
+
+    <!-- AI Populate — Produto único (tab 4) -->
+    @if (currentTabIndex === 4) {
+      @if (aiPopulating && aiProgress) {
+        <div class="td-ai-progress-wrap">
+          <div class="td-ai-progress-bar">
+            <div class="td-ai-progress-fill" [style.width.%]="(aiProgress.current / aiProgress.total) * 100"></div>
+          </div>
+          <div class="td-ai-progress-bottom">
+            <mat-icon class="td-ai-icon td-ai-icon--spin">auto_awesome</mat-icon>
+            <span class="td-ai-progress-count">{{ aiProgress.current }}/{{ aiProgress.total }}</span>
+            <span class="td-ai-progress-ref">{{ aiProgress.ref }}</span>
+            <span class="td-ai-eta-badge">{{ calcEta(aiProgress.current, aiProgress.total, aiStartTime) }}</span>
+            <button class="td-ai-cancel-btn" (click)="cancelAiPopulate()" matTooltip="Cancelar">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+        </div>
+      } @else if (aiPopulatingProduto) {
+        <div class="td-ai-progress-wrap">
+          <div class="td-ai-progress-bar">
+            <div class="td-ai-progress-fill" [style.width.%]="aiProdutoProgress"></div>
+          </div>
+          <div class="td-ai-progress-bottom">
+            <mat-icon class="td-ai-icon td-ai-icon--spin">auto_awesome</mat-icon>
+            <span class="td-ai-progress-count">1/1</span>
+            <span class="td-ai-progress-ref">{{ selectedProduto?.ref }}</span>
+            <span class="td-ai-eta-badge">{{ aiProdutoEta }}</span>
+          </div>
+        </div>
+      } @else {
+        <button class="td-btn-ai-populate"
+                (click)="aiPopulateProduto()"
+                [disabled]="aiPopulating || aiPopulatingProduto || !selectedProduto"
+                matTooltip="Preencher todos os valores deste produto com IA"
+                matTooltipPosition="below">
+          <mat-icon class="td-ai-icon">auto_awesome</mat-icon>
+          <span>AI Populate</span>
+        </button>
+      }
+    }
+
+    
+
+    <button mat-icon-button (click)="fechar()" matTooltip="Fechar">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+</div>
+
+<div class="td-body">
+  <mat-tab-group class="supplier-tabs" [selectedIndex]="supplierIndex" (selectedIndexChange)="onSupplierTabChange($event)" animationDuration="120ms">
+    <mat-tab label="Suprides"></mat-tab>
+    <mat-tab label="Esprinet"></mat-tab>
+  </mat-tab-group>
+
+  <!-- ══ Painel de Logs IA ═══════════════════════════════════════════════════ -->
+   <!--
+  @if (aiLogs.length > 0) {
+    <div class="td-ai-logs-panel">
+      <div class="td-ai-logs-header" (click)="aiLogsExpanded = !aiLogsExpanded">
+        <mat-icon class="td-ai-logs-icon">terminal</mat-icon>
+        <span>Diagnóstico IA ({{ aiLogs.length }} linhas)</span>
+        @if (aiLogsWarnCount > 0) {
+          <span class="td-ai-logs-badge-warn">{{ aiLogsWarnCount }} alertas</span>
+        }
+        <mat-icon class="td-ai-logs-chevron">{{ aiLogsExpanded ? 'expand_less' : 'expand_more' }}</mat-icon>
+      </div>
+      @if (aiLogsExpanded) {
+        <div class="td-ai-logs-body" #aiLogsBody>
+          @for (log of aiLogs; track $index) {
+            <div class="td-ai-log-line td-ai-log-line--{{ log.level }}">{{ log.msg }}</div>
+          }
+        </div>
+      }
+    </div>
+  } -->
+
+  @if (loading) {
+    <div class="td-loading">
+      <mat-spinner diameter="36"></mat-spinner>
+      <span>A carregar…</span>
+    </div>
+  } @else {
+
+  <mat-tab-group class="td-tabs" animationDuration="120ms"
+                 [selectedIndex]="currentTabIndex"
+                 (selectedTabChange)="onTabChange($event.index)">
+
+    <!-- ═══════ TAB: TAGS (CRUD) ═════════════════════════════════ -->
+    <mat-tab>
+      <ng-template mat-tab-label>
+        <mat-icon class="tab-icon">sell</mat-icon>
+        Tags
+        <span class="tab-count">{{ tags.length }}</span>
+      </ng-template>
+
+      <div class="td-tags-panel">
+        <!-- Inline form -->
+        <div class="td-tag-form">
+          <mat-form-field appearance="outline" class="td-field-nome">
+            <mat-label>Nome da tag</mat-label>
+            <input matInput [(ngModel)]="tagForm.nome"
+                   placeholder="ex: Potência"
+                   [matAutocomplete]="autoTags"
+                   (ngModelChange)="onTagNomeChange()" />
+            @if (tagNomeExact) {
+              <mat-hint class="td-hint-warn">
+                <mat-icon class="td-hint-warn-icon">warning</mat-icon>
+                Já existe uma tag com este nome exato
+              </mat-hint>
+            }
+            <mat-autocomplete #autoTags="matAutocomplete" [displayWith]="tagDisplayFn">
+              @for (t of tagSuggestions; track t.id) {
+                <mat-option [value]="t.nome" class="td-tag-option">
+                  <div class="td-tag-option-inner">
+                    <mat-icon class="td-tag-option-icon">sell</mat-icon>
+                    <span class="td-tag-option-nome">{{ t.nome }}</span>
+                    @if (t.descricao) {
+                      <span class="td-tag-option-desc">{{ t.descricao }}</span>
+                    }
+                  </div>
+                </mat-option>
+              }
+            </mat-autocomplete>
+          </mat-form-field>
+          <mat-form-field appearance="outline" class="td-field-desc">
+            <mat-label>Descrição (opcional)</mat-label>
+            <input matInput [(ngModel)]="tagForm.descricao" placeholder="ex: Potência em watts" />
+          </mat-form-field>
+          <button mat-flat-button color="primary" class="td-btn-criar"
+                  (click)="saveTag()" [disabled]="savingTag">
+            <mat-icon>{{ editingTagId === null ? 'add' : 'check' }}</mat-icon>
+            {{ savingTag ? 'A guardar…' : (editingTagId === null ? 'Criar' : 'Atualizar') }}
+          </button>
+          @if (editingTagId !== null) {
+            <button mat-stroked-button (click)="cancelEditTag()">Cancelar</button>
+          }
+        </div>
+
+        <!-- Tags table -->
+        <div class="td-tags-table-wrap">
+          <table class="td-tags-table">
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Descrição</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (t of tags; track t.id) {
+                <tr [class.td-row-editing]="editingTagId === t.id">
+                  <td class="td-cell-nome">{{ t.nome }}</td>
+                  <td class="td-cell-desc">{{ t.descricao || '—' }}</td>
+                  <td class="col-actions">
+                    <button mat-icon-button matTooltip="Editar" (click)="startEditTag(t)">
+                      <mat-icon>edit</mat-icon>
+                    </button>
+                    <button mat-icon-button color="warn" matTooltip="Eliminar" (click)="deleteTag(t)">
+                      <mat-icon>delete</mat-icon>
+                    </button>
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="2" class="td-empty-row">Nenhuma tag criada. Adicione a primeira acima.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </mat-tab>
+
+    <!-- ═══════ TAB: GRUPOS ═══════════════════════════════════════ -->
+    <mat-tab>
+      <ng-template mat-tab-label>
+        <mat-icon class="tab-icon">folder</mat-icon>
+        Grupos
+        <span class="tab-count">{{ grupos.length }}</span>
+      </ng-template>
+
+      <div class="td-split">
+
+        <!-- Lista com search -->
+        <div class="td-list-panel">
+          <div class="td-search-box">
+            <mat-icon>search</mat-icon>
+            <input [(ngModel)]="searchGrupo" (ngModelChange)="onSearchChange()"
+                   placeholder="Pesquisar grupo…" />
+            @if (searchGrupo) {
+              <button class="td-search-clear" (click)="searchGrupo=''; onSearchChange()">
+                <mat-icon>close</mat-icon>
+              </button>
+            }
+          </div>
+          <div class="td-list-header">
+            {{ filteredGrupos.length }} grupo(s)
+          </div>
+          <div class="td-list-body">
+            @for (g of filteredGrupos; track g) {
+              <div class="td-list-row"
+                   [class.td-list-row--active]="selectedGrupo === g"
+                   (click)="selectGrupo(g)">
+                <mat-icon class="td-list-icon">folder_open</mat-icon>
+                <span class="td-list-name">{{ g }}</span>
+              </div>
+            } @empty {
+              <div class="td-empty-list">Nenhum grupo encontrado.</div>
+            }
+          </div>
+        </div>
+
+        <!-- Detalhe -->
+        <div class="td-detail-panel">
+          @if (!selectedGrupo) {
+            <div class="td-placeholder">
+              <mat-icon>folder_open</mat-icon>
+              <p>Selecione um grupo para atribuir tags.</p>
+            </div>
+          } @else if (loadingGrupo) {
+            <div class="td-loading-inline"><mat-spinner diameter="24"></mat-spinner></div>
+          } @else {
+            <div class="td-detail-content">
+              <div class="td-detail-title">
+                <mat-icon>folder_open</mat-icon>
+                <strong>{{ selectedGrupo }}</strong>
+                <span class="td-badge td-badge--grupo">Grupo</span>
+              </div>
+              @if (!tags.length) {
+                <p class="td-hint">Cria tags no separador <strong>Tags</strong> para as poder atribuir.</p>
+              } @else {
+                <div class="td-section-label">Tags atribuídas</div>
+                <app-pill-selector [groups]="tags" [selected]="grupoTagIds"
+                  (selectionChange)="onGrupoSelectionChange($event)"></app-pill-selector>
+              }
+            </div>
+            <div class="td-detail-save-row">
+              @if (grupoUnsaved) {
+                <span class="td-unsaved-warn">
+                  <mat-icon>warning_amber</mat-icon>Tags não guardadas
+                </span>
+              }
+              <button mat-flat-button color="primary" class="td-btn-save"
+                      (click)="saveGrupo()" [disabled]="saving">
+                <mat-icon>save</mat-icon>{{ saving ? 'A guardar…' : 'Guardar grupo' }}
+              </button>
+            </div>
+          }
+        </div>
+
+      </div>
+    </mat-tab>
+
+    <!-- ═══════ TAB: FAMÍLIAS ════════════════════════════════════ -->
+    <mat-tab>
+      <ng-template mat-tab-label>
+        <mat-icon class="tab-icon">folder_special</mat-icon>
+        Famílias
+        <span class="tab-count">{{ familias.length }}</span>
+      </ng-template>
+
+      <div class="td-split">
+
+        <!-- Lista agrupada por Grupo, com search -->
+        <div class="td-list-panel">
+          <div class="td-search-box">
+            <mat-icon>search</mat-icon>
+            <input [(ngModel)]="searchFamilia" (ngModelChange)="onSearchChange()"
+                   placeholder="Pesquisar família…" />
+            @if (searchFamilia) {
+              <button class="td-search-clear" (click)="searchFamilia=''; onSearchChange()">
+                <mat-icon>close</mat-icon>
+              </button>
+            }
+          </div>
+          <div class="td-list-header">
+            {{ familias.length }} famíla(s) em {{ familiaGroups.length }} grupo(s)
+          </div>
+          <div class="td-list-body">
+            @for (fg of familiaGroups; track fg.grupo) {
+              <!-- Grupo header -->
+              <div class="td-group-header td-group-header--nav" (click)="navigateToGrupo(fg.grupo)">
+                <mat-icon>folder</mat-icon>
+                {{ fg.grupo }}
+                <span class="td-group-count">{{ fg.familias.length }}</span>
+              </div>
+              @for (f of fg.familias; let i = $index; track familiaKey(i, f)) {
+                <div class="td-list-row td-list-row--child"
+                     [class.td-list-row--active]="isFamiliaSelected(f)"
+                     (click)="selectFamilia(f)">
+                  <mat-icon class="td-list-icon">folder_special</mat-icon>
+                  <span class="td-list-name">{{ f.familia }}</span>
+                </div>
+              }
+            } @empty {
+              <div class="td-empty-list">Nenhuma família encontrada.</div>
+            }
+          </div>
+        </div>
+
+        <!-- Detalhe -->
+        <div class="td-detail-panel">
+          @if (!selectedFamilia) {
+            <div class="td-placeholder">
+              <mat-icon>folder_special</mat-icon>
+              <p>Selecione uma família para atribuir tags.</p>
+            </div>
+          } @else if (loadingFamilia) {
+            <div class="td-loading-inline"><mat-spinner diameter="24"></mat-spinner></div>
+          } @else {
+            <div class="td-detail-content">
+              <div class="td-detail-title">
+                <mat-icon>folder_special</mat-icon>
+                <strong>{{ selectedFamilia.familia }}</strong>
+                <span class="td-badge td-badge--familia">Família</span>
+                <span class="td-breadcrumb">{{ selectedFamilia.grupo }}</span>
+              </div>
+              @if (familiaInherited.length) {
+                <div class="td-inherited">
+                  <span class="td-inherited-label">Herdado do grupo:</span>
+                  @for (t of familiaInherited; track t.id) {
+                    @if (tagsSource !== 'suprides') {
+                      <span
+                        class="td-inherited-chip"
+                        [class.td-inherited-chip--active]="!familiaExcludedIds.has(t.id)"
+                        [class.td-inherited-chip--excluded]="familiaExcludedIds.has(t.id)"
+                        [matTooltip]="familiaExcludedIds.has(t.id) ? 'Clica para reativar esta tag herdada' : 'Clica para excluir esta tag herdada nesta família'"
+                        (click)="toggleFamiliaExclude(t.id)">
+                        {{ t.nome }}
+                        @if (familiaExcludedIds.has(t.id)) {<mat-icon class="td-excluded-icon">block</mat-icon>}
+                      </span>
+                    } @else {
+                      <span class="td-inherited-chip td-inherited-chip--active td-inherited-chip--readonly"
+                            matTooltip="Tag herdada do nível superior (só leitura)">
+                        {{ t.nome }}
+                      </span>
+                    }
+                  }
+                </div>
+              }
+              @if (!tags.length) {
+                <p class="td-hint">Cria tags no separador <strong>Tags</strong> para as poder atribuir.</p>
+              } @else {
+                <div class="td-section-label">Tags atribuídas a esta família</div>
+                <app-pill-selector [groups]="tagsForFamiliaPillSelector" [selected]="familiaTagIds"
+                  (selectionChange)="onFamiliaSelectionChange($event)"></app-pill-selector>
+              }
+            </div>
+            <div class="td-detail-save-row">
+              @if (familiaUnsaved) {
+                <span class="td-unsaved-warn">
+                  <mat-icon>warning_amber</mat-icon>Tags não guardadas
+                </span>
+              }
+              <button mat-flat-button color="primary" class="td-btn-save"
+                      (click)="saveFamilia()" [disabled]="saving">
+                <mat-icon>save</mat-icon>{{ saving ? 'A guardar…' : 'Guardar família' }}
+              </button>
+            </div>
+          }
+        </div>
+
+      </div>
+    </mat-tab>
+
+    <!-- ═══════ TAB: SUBFAMÍLIAS ════════════════════════════════ -->
+    <mat-tab>
+      <ng-template mat-tab-label>
+        <mat-icon class="tab-icon">label_outline</mat-icon>
+        Subfamílias
+        <span class="tab-count">{{ subfamilias.length }}</span>
+      </ng-template>
+
+      <div class="td-split">
+
+        <!-- Lista agrupada por Grupo > Família, com search -->
+        <div class="td-list-panel">
+          <div class="td-search-box">
+            <mat-icon>search</mat-icon>
+            <input [(ngModel)]="searchSubfamilia" (ngModelChange)="onSearchChange()"
+                   placeholder="Pesquisar subfamília…" />
+            @if (searchSubfamilia) {
+              <button class="td-search-clear" (click)="searchSubfamilia=''; onSearchChange()">
+                <mat-icon>close</mat-icon>
+              </button>
+            }
+          </div>
+          <div class="td-list-header">
+            {{ subfamilias.length }} subfamília(s)
+          </div>
+          <div class="td-list-body">
+            @for (sfg of subfamiliaGroups; track sfg.grupo + sfg.familia) {
+              <!-- Grupo > Família header -->
+              <div class="td-group-header td-group-header--sub">
+                <mat-icon>folder</mat-icon>
+                <span class="td-group-header-nav" (click)="navigateToGrupo(sfg.grupo)">{{ sfg.grupo }}</span>
+                <mat-icon class="td-chevron">chevron_right</mat-icon>
+                <span class="td-group-header-familia td-group-header-nav" (click)="navigateToFamilia(sfg.grupo, sfg.familia)">{{ sfg.familia }}</span>
+                <span class="td-group-count">{{ sfg.subfamilias.length }}</span>
+              </div>
+              @for (sf of sfg.subfamilias; let i = $index; track subfamiliaKey(i, sf)) {
+                <div class="td-list-row td-list-row--child"
+                     [class.td-list-row--active]="isSubfamiliaSelected(sf)"
+                     (click)="selectSubfamilia(sf)">
+                  <mat-icon class="td-list-icon">label</mat-icon>
+                  <span class="td-list-name">{{ sf.subfamilia }}</span>
+                </div>
+              }
+            } @empty {
+              <div class="td-empty-list">Nenhuma subfamília encontrada.</div>
+            }
+          </div>
+        </div>
+
+        <!-- Detalhe -->
+        <div class="td-detail-panel">
+          @if (!selectedSubfamilia) {
+            <div class="td-placeholder">
+              <mat-icon>label_outline</mat-icon>
+              <p>Selecione uma subfamília para atribuir tags.</p>
+            </div>
+          } @else if (loadingSubfamilia) {
+            <div class="td-loading-inline"><mat-spinner diameter="24"></mat-spinner></div>
+          } @else {
+            <div class="td-detail-content">
+              <div class="td-detail-title">
+                <mat-icon>label</mat-icon>
+                <strong>{{ selectedSubfamilia.subfamilia }}</strong>
+                <span class="td-badge td-badge--subfamilia">Subfamília</span>
+                <span class="td-breadcrumb">{{ selectedSubfamilia.grupo }} › {{ selectedSubfamilia.familia }}</span>
+              </div>
+              @if (subfamiliaInherited.length) {
+                <div class="td-inherited">
+                  <span class="td-inherited-label">Herdado:</span>
+                  @for (t of subfamiliaInherited; track t.id) {
+                    @if (tagsSource !== 'suprides') {
+                      <span
+                        class="td-inherited-chip"
+                        [class.td-inherited-chip--active]="!isSubfamiliaTagExcluded(t.id)"
+                        [class.td-inherited-chip--excluded]="isSubfamiliaTagExcluded(t.id)"
+                        [matTooltip]="subfamiliaAncestorExcludedIds.has(t.id)
+                          ? (subfamiliaTagIds.includes(t.id)
+                            ? 'Ativa nesta subfamília apesar de estar desativada na família. Clica para voltar a desativar.'
+                            : 'Desativada na família. Clica para ativar apenas nesta subfamília.')
+                          : (subfamiliaExcludedIds.has(t.id)
+                            ? 'Clica para reativar esta tag herdada'
+                            : 'Clica para excluir esta tag herdada nesta subfamília')"
+                        (click)="toggleSubfamiliaExclude(t.id)">
+                        {{ t.nome }}<span class="td-inherited-from">{{ t.from }}</span>
+                        @if (isSubfamiliaTagExcluded(t.id)) {<mat-icon class="td-excluded-icon">block</mat-icon>}
+                      </span>
+                    } @else {
+                      <span class="td-inherited-chip td-inherited-chip--active td-inherited-chip--readonly"
+                            matTooltip="Tag herdada do nível superior (só leitura)">
+                        {{ t.nome }}<span class="td-inherited-from">{{ t.from }}</span>
+                      </span>
+                    }
+                  }
+                </div>
+              }
+              @if (!tags.length) {
+                <p class="td-hint">Cria tags no separador <strong>Tags</strong> para as poder atribuir.</p>
+              } @else {
+                <div class="td-section-label">Tags atribuídas a esta subfamília</div>
+                <app-pill-selector [groups]="tagsForSubfamiliaPillSelector" [selected]="subfamiliaTagIds"
+                  (selectionChange)="onSubfamiliaSelectionChange($event)"></app-pill-selector>
+              }
+            </div>
+            <div class="td-detail-save-row">
+              @if (subfamiliaUnsaved) {
+                <span class="td-unsaved-warn">
+                  <mat-icon>warning_amber</mat-icon>Tags não guardadas
+                </span>
+              }
+              <button mat-flat-button color="primary" class="td-btn-save"
+                      (click)="saveSubfamilia()" [disabled]="saving">
+                <mat-icon>save</mat-icon>{{ saving ? 'A guardar…' : 'Guardar subfamília' }}
+              </button>
+            </div>
+          }
+        </div>
+
+      </div>
+    </mat-tab>
+
+    <!-- ═══════ TAB: PRODUTOS ═══════════════════════════════════ -->
+    <mat-tab>
+      <ng-template mat-tab-label>
+        <mat-icon class="tab-icon">inventory_2</mat-icon>
+        Produtos
+      </ng-template>
+
+      <div class="td-split td-split--produtos">
+
+        <!-- Painel esquerdo: tree + pesquisa -->
+        <div class="td-list-panel">
+          <div class="rm-panel-label">Produtos</div>
+
+          <div class="td-search-box">
+            <mat-icon>search</mat-icon>
+            <input [(ngModel)]="searchProduto" (ngModelChange)="onSearchProdutoChange()"
+                   placeholder="Pesquisar por ref ou nome…" />
+            @if (searchProduto) {
+              <button class="td-search-clear" (click)="searchProduto=''; onSearchProdutoChange()">
+                <mat-icon>close</mat-icon>
+              </button>
+            }
+          </div>
+
+          @if (loadingProdutos) {
+            <div class="td-loading-inline"><mat-spinner diameter="24"></mat-spinner></div>
+          }
+
+          <!-- Resultados de pesquisa (lista plana) -->
+          @if (!loadingProdutos && searchProduto.trim().length >= 2) {
+            <div class="td-list-body td-prod-tree">
+              @for (p of filteredProdutos; track p.ref) {
+                <div class="rm-produto rm-produto--search"
+                     [class.rm-produto--selected]="selectedProduto?.ref === p.ref"
+                     [attr.data-produto-ref]="p.ref"
+                     (click)="selectProduto(p)">
+                  <mat-icon class="rm-produto-icon">inventory_2</mat-icon>
+                  <div class="rm-produto-search-info">
+                    <span class="rm-produto-search-ref">{{ p.ref }}</span>
+                    <span class="rm-produto-name">{{ p.design }}</span>
+                  </div>
+                </div>
+              } @empty {
+                <div class="rm-empty">Nenhum produto para "{{ searchProduto }}".</div>
+              }
+            </div>
+          }
+
+          <!-- Árvore (quando não pesquisa) -->
+          @if (!loadingProdutos && searchProduto.trim().length < 2) {
+            @if (produtosTree.length === 0) {
+              <div class="rm-empty">Nenhuma subfamília encontrada.</div>
+            } @else {
+              <div class="td-list-body td-prod-tree">
+                @for (g of produtosTree; track g.nome) {
+                  <div class="rm-tree-grupo">
+                    <div class="rm-tree-row rm-tree-row--grupo" (click)="toggleGrupoNode(g)">
+                      <mat-icon class="rm-chevron">{{ g.expanded ? 'expand_more' : 'chevron_right' }}</mat-icon>
+                      <span class="rm-node-name">{{ g.nome }}</span>
+                      <span class="rm-node-count">{{ prodGrupoTotal(g) }}</span>
+                    </div>
+                    @if (g.expanded) {
+                      @for (f of g.fams; track f.familia) {
+                        <div class="rm-tree-row rm-tree-row--familia" (click)="toggleFamNode(f)">
+                          <mat-icon class="rm-chevron">{{ f.expanded ? 'expand_more' : 'chevron_right' }}</mat-icon>
+                          <span class="rm-node-name">{{ f.familia }}</span>
+                          <span class="rm-node-count">{{ prodFamTotal(f) }}</span>
+                        </div>
+                        @if (f.expanded) {
+                          @for (s of f.subs; track s.subfamilia) {
+                            <div class="rm-tree-row rm-tree-row--sub" (click)="toggleSubNode(s)">
+                              <mat-icon class="rm-chevron">{{ s.expanded ? 'expand_more' : 'chevron_right' }}</mat-icon>
+                              <span class="rm-node-name">{{ s.subfamilia }}</span>
+                              @if (s.loaded) {
+                                <span class="rm-node-count">{{ s.produtos.length }}</span>
+                              } @else if (s.loading) {
+                                <span class="rm-node-count rm-node-count--loading">…</span>
+                              }
+                            </div>
+                            @if (s.expanded) {
+                              @if (s.loading) {
+                                <div class="rm-sub-loading"><mat-spinner diameter="16"></mat-spinner></div>
+                              }
+                              @if (!s.loading && !s.countOnly) {
+                                @for (p of s.produtos; track p.ref) {
+                                  <div class="rm-produto"
+                                       [class.rm-produto--selected]="selectedProduto?.ref === p.ref"
+                                       [attr.data-produto-ref]="p.ref"
+                                       (click)="selectProduto(p)">
+                                    <mat-icon class="rm-produto-icon">inventory_2</mat-icon>
+                                    <span class="rm-produto-name" [title]="p.design">{{ p.design || p.ref }}</span>
+                                  </div>
+                                }
+                                @if (s.loaded && s.produtos.length === 0) {
+                                  <div class="rm-empty rm-empty--inline">Sem produtos</div>
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  </div>
+                }
+              </div>
+            }
+          }
+        </div>
+
+        <!-- Painel direito: tags (rm-cards-grid style) -->
+        <div class="td-detail-panel">
+          @if (!selectedProduto) {
+            <div class="rm-tags-empty">
+              <mat-icon>touch_app</mat-icon>
+              <p>Seleciona um produto para ver as tags</p>
+              <small>Expande a árvore e seleciona um produto</small>
+            </div>
+          } @else if (loadingProdutoTags) {
+            <div class="td-loading-inline"><mat-spinner diameter="24"></mat-spinner></div>
+          } @else {
+
+            <!-- Cabeçalho do produto -->
+            <div class="rm-product-header">
+              <span class="rm-product-ref">{{ selectedProduto.ref }}</span>
+              <span class="rm-product-design" [title]="selectedProduto.design">{{ selectedProduto.design }}</span>
+              <button class="rm-clear-btn"
+                      (click)="clearProdutoTags()"
+                      [disabled]="savingProduto || loadingProdutoTags"
+                      matTooltip="Limpar todas as tags deste produto"
+                      matTooltipPosition="below">
+                @if (!savingProduto) { <mat-icon>delete_sweep</mat-icon> }
+                @if (savingProduto) { <mat-spinner diameter="13"></mat-spinner> }
+              </button>
+              <div class="rm-edit-toggle"
+                   (click)="toggleProdutoEditMode()"
+                   [matTooltip]="produtoEditMode ? 'Cancelar edição' : 'Editar tags manualmente'"
+                   matTooltipPosition="below">
+                <span class="rm-edit-toggle-label">{{ produtoEditMode ? 'Editar' : 'Só leitura' }}</span>
+                <div class="rm-ios-switch" [class.rm-ios-switch--on]="produtoEditMode">
+                  <div class="rm-ios-thumb"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Grid leitura -->
+            @if (!produtoEditMode) {
+              <!-- Toggle Populated / Normalized -->
+              <div class="rm-view-toggle-bar">
+                <div class="rm-segmented-toggle rm-segmented-toggle--2">
+                  <div class="rm-segmented-indicator"
+                       [style.transform]="produtoViewMode === 'populated' ? 'translateX(0)' : 'translateX(100%)'">
+                  </div>
+                  <button class="rm-segmented-option"
+                          [class.rm-segmented-option--active]="produtoViewMode === 'populated'"
+                          (click)="setViewMode('populated')">
+                    <mat-icon>history</mat-icon>
+                    Populated
+                  </button>
+                  <button class="rm-segmented-option"
+                          [class.rm-segmented-option--active]="produtoViewMode === 'normalized'"
+                          (click)="setViewMode('normalized')">
+                    <mat-icon>auto_fix_high</mat-icon>
+                    Normalizados
+                  </button>
+                </div>
+
+                @if (changedTagCount > 0) {
+                  <button class="rm-changed-filter"
+                          [class.rm-changed-filter--active]="showOnlyChanged"
+                          (click)="showOnlyChanged = !showOnlyChanged; cdr.detectChanges()"
+                          [matTooltip]="showOnlyChanged ? 'Mostrar todas as tags' : 'Mostrar apenas tags alteradas pela normalização'"
+                          matTooltipPosition="below">
+                    <mat-icon>filter_alt</mat-icon>
+                    Só alterados
+                    <span class="rm-changed-badge">{{ changedTagCount }}</span>
+                  </button>
+                }
+              </div>
+
+              <div class="rm-cards-grid">
+                @for (tag of visibleProdutoEffectiveTags; track tag.id) {
+                  <div class="rm-card"
+                       [class.rm-card--filled]="getDisplayValue(tag.id)"
+                       [class.rm-card--changed]="produtoViewMode === 'normalized' && isTagChanged(tag.id)"
+                       [matTooltip]="produtoViewMode === 'normalized' && isTagChanged(tag.id)
+                         ? 'Populated: ' + produtoTagValues[tag.id]
+                         : ''"
+                       matTooltipPosition="above">
+                    <div class="rm-card-label">
+                      {{ tag.nome }}
+                      @if (tag.unidade) { <span class="rm-card-unit">{{ tag.unidade }}</span> }
+                      @if (isTagChanged(tag.id)) {
+                        <span class="rm-card-changed-dot"
+                              [class.rm-card-changed-dot--original]="produtoViewMode !== 'normalized'">
+                        </span>
+                      }
+                    </div>
+                    <div class="rm-card-value"
+                         [class.rm-card-value--populated]="!!getDisplayValue(tag.id) && (produtoViewMode === 'populated' || (produtoViewMode === 'normalized' && !isTagChanged(tag.id)))"
+                         [class.rm-card-value--normalized]="produtoViewMode === 'normalized' && !!getDisplayValue(tag.id) && isTagChanged(tag.id)"
+                         [class.rm-card-value--empty]="!getDisplayValue(tag.id)">
+                      {{ getDisplayValue(tag.id) || '—' }}
+                    </div>
+                  </div>
+                }
+                @empty {
+                  <div class="rm-changed-empty">
+                    <mat-icon>check_circle_outline</mat-icon>
+                    <span>Nenhum valor alterado pela normalização</span>
+                  </div>
+                }
+              </div>
+            }
+
+            <!-- Grid edição -->
+            @if (produtoEditMode) {
+              <div class="rm-cards-grid rm-cards-grid--edit">
+                @for (tag of produtoEffectiveTags; track tag.id) {
+                  <div class="rm-card rm-card--editable">
+                    <div class="rm-card-label">
+                      {{ tag.nome }}
+                      @if (tag.unidade) { <span class="rm-card-unit">{{ tag.unidade }}</span> }
+                    </div>
+                    <input class="rm-card-input"
+                           [(ngModel)]="produtoTagValues[tag.id]"
+                           (ngModelChange)="onProdutoTagChange()"
+                           placeholder="Valor…" />
+                  </div>
+                }
+              </div>
+              <div class="rm-edit-save-row">
+                @if (produtoUnsaved) {
+                  <span class="td-unsaved-warn">
+                    <mat-icon>warning_amber</mat-icon>Valores não guardados
+                  </span>
+                }
+                <button mat-stroked-button (click)="toggleProdutoEditMode()" [disabled]="savingProduto">Cancelar</button>
+                <button mat-flat-button color="primary" (click)="saveProduto()" [disabled]="savingProduto">
+                  <mat-icon>save</mat-icon>{{ savingProduto ? 'A guardar…' : 'Guardar' }}
+                </button>
+              </div>
+            }
+
+          }
+        </div>
+
+      </div>
+    </mat-tab>
+
+  </mat-tab-group>
+
+  }
+</div>
+
+<!-- Footer -->
+<div class="td-footer">
+  <div class="td-footer-hint">
+    @if (currentTabIndex === 4 && selectedProduto) {
+      <div class="td-footer-prod-info">
+        <mat-icon class="td-footer-prod-icon">inventory_2</mat-icon>
+        <span class="td-footer-prod-ref">{{ selectedProduto.ref }}</span>
+        <span class="td-footer-prod-name">{{ selectedProduto.design }}</span>
+        <span class="td-footer-sep">·</span>
+        <span class="td-footer-prod-fill"
+              [class.td-fill--full]="produtoFilledCount === produtoEffectiveTags.length && produtoEffectiveTags.length > 0"
+              [class.td-fill--partial]="produtoFilledCount > 0 && produtoFilledCount < produtoEffectiveTags.length"
+              [class.td-fill--empty]="produtoFilledCount === 0 && produtoEffectiveTags.length > 0">
+          <mat-icon>{{ produtoFilledCount === produtoEffectiveTags.length && produtoEffectiveTags.length > 0 ? 'check_circle' : 'radio_button_unchecked' }}</mat-icon>
+          {{ produtoFilledCount }}/{{ produtoEffectiveTags.length }} tags
+        </span>
+        @if (produtoInfo.ean) {
+          <span class="td-footer-sep">·</span>
+          <span class="td-footer-prod-ean">
+            <mat-icon>qr_code</mat-icon>{{ produtoInfo.ean }}
+          </span>
+        }
+        @if (produtoInfo.id_produto) {
+          <span class="td-footer-sep">·</span>
+          <span class="td-footer-prod-idprod">ID: {{ produtoInfo.id_produto }}</span>
+        }
+      </div>
+    } @else if (selectedGrupo || selectedFamilia || selectedSubfamilia) {
+      <mat-icon>info_outline</mat-icon>
+      Subfamília › Família › Grupo — o nível mais específico tem prioridade.
+    }
+  </div>
+  <button mat-button class="td-btn-fechar" (click)="fechar()">Fechar</button>
+</div>
+
+ 
+
+

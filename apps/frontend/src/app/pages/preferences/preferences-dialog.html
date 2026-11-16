@@ -1,0 +1,285 @@
+<div class="prefs-shell">
+
+  <!-- ── SIDEBAR ── -->
+  <nav class="sidebar">
+    <div class="sidebar-title">Definições</div>
+    <ul class="nav-list">
+      <li class="nav-item" [class.active]="section === 'b2cSync'" (click)="section = 'b2cSync'">
+        <mat-icon>storefront</mat-icon>
+        <span>Syncs B2C</span>
+      </li>
+      <li class="nav-item" [class.active]="section === 'words'" (click)="loadWords(); section = 'words'">
+        <mat-icon>block</mat-icon>
+        <span>Tags</span>
+      </li>
+      <li class="nav-item" [class.active]="section === 'forcartags'" (click)="section = 'forcartags'">
+        <mat-icon>skip_next</mat-icon>
+        <span>Forçar Tags</span>
+      </li>
+      <li class="nav-item" [class.active]="section === 'prompt'" (click)="loadCustomPrompt(); section = 'prompt'">
+        <mat-icon>edit_note</mat-icon>
+        <span>Prompt AI</span>
+      </li>
+      <li class="nav-item" [class.active]="section === 'ligacoes'" (click)="loadConn(); section = 'ligacoes'">
+        <mat-icon>cable</mat-icon>
+        <span>Ligações</span>
+      </li>
+    </ul>
+  </nav>
+
+  <!-- ── CONTEÚDO ── -->
+  <div class="prefs-body">
+
+    <div class="panel-content">
+
+      <!-- ── SYNCS B2C ── -->
+      @if (section === 'b2cSync') {
+        <div class="panel-header">
+          <mat-icon>storefront</mat-icon>
+          <div>
+            <div class="panel-title">Syncs B2C</div>
+            <div class="panel-subtitle">Sincronização de produtos com o Shopify via Suprides</div>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field-label">
+            <span class="field-name">Criar produtos novos na Shopify</span>
+            <span class="field-desc">Desligado: o sync só atualiza os produtos que já existem na loja; os novos da Suprides são ignorados.</span>
+          </div>
+          <mat-slide-toggle
+            [checked]="createNewProducts"
+            [disabled]="adminSettingsSaving"
+            (change)="toggleCreateNewProducts($any($event).checked)"
+            color="primary">
+          </mat-slide-toggle>
+        </div>
+
+        <div class="b2c-supplier-row">
+          <div class="b2c-supplier-info">
+            <span class="b2c-supplier-name">Suprides → Base de dados local</span>
+            <span class="b2c-supplier-desc">Atualiza a base de dados local com todos os produtos da API Suprides</span>
+          </div>
+          <button class="b2c-sync-btn" type="button" (click)="syncSuprides()" [disabled]="supridesRunning">
+            @if (supridesRunning) {
+              <mat-progress-spinner diameter="14" mode="indeterminate"></mat-progress-spinner>
+              <span>A sincronizar…</span>
+            } @else {
+              <mat-icon>sync</mat-icon>
+              <span>Sync Suprides</span>
+            }
+          </button>
+        </div>
+
+        @if (supridesLogs.length > 0) {
+          <div class="b2c-logs">
+            @for (entry of supridesLogs; track $index) {
+              <div class="b2c-log-line" [class.log-done]="entry.type === 'done'" [class.log-error]="entry.type === 'error'">
+                <mat-icon class="log-icon">
+                  {{ entry.type === 'done' ? 'check_circle' : entry.type === 'error' ? 'error' : 'info' }}
+                </mat-icon>
+                <span class="log-time">{{ entry.ts | date:'HH:mm:ss' }}</span>
+                <span class="log-msg">{{ entry.message }}</span>
+              </div>
+            }
+          </div>
+        }
+
+        <div class="b2c-supplier-row">
+          <div class="b2c-supplier-info">
+            <span class="b2c-supplier-name">Node IDs do menu</span>
+            <span class="b2c-supplier-desc">Recalcula o nó do menu Shopify para cada produto (após sync ou alteração do mapeamento)</span>
+          </div>
+          <button class="b2c-sync-btn" type="button" (click)="rebuildNodeIds()" [disabled]="rebuildingNodeIds">
+            @if (rebuildingNodeIds) {
+              <mat-progress-spinner diameter="14" mode="indeterminate"></mat-progress-spinner>
+              <span>A reconstruir…</span>
+            } @else {
+              <mat-icon>account_tree</mat-icon>
+              <span>Rebuild Node IDs</span>
+            }
+          </button>
+        </div>
+      }
+
+      <!-- ── TAGS ── -->
+      @if (section === 'words') {
+        <div class="panel-header">
+          <mat-icon>block</mat-icon>
+          <div>
+            <div class="panel-title">Tags — Exclusões</div>
+            <div class="panel-subtitle">Prefixos e palavras excluídos do mapeamento</div>
+          </div>
+        </div>
+
+        @if (wordsLoading) {
+          <div class="words-loading">
+            <mat-progress-spinner diameter="28" mode="indeterminate"></mat-progress-spinner>
+            <span>A carregar…</span>
+          </div>
+        } @else {
+          <div class="words-section-title">
+            <mat-icon>text_fields</mat-icon>
+            Prefixos excluídos
+            @if (excludedPrefixes.length > 0) {
+              <span class="words-section-count">{{ excludedPrefixes.length }}</span>
+            }
+          </div>
+          @if (excludedPrefixes.length === 0) {
+            <div class="words-empty words-empty--small">
+              <span>Nenhum prefixo excluído.</span>
+            </div>
+          } @else {
+            <div class="words-list">
+              @for (p of excludedPrefixes; track p) {
+                <div class="word-chip">
+                  <span>{{ p }}</span>
+                  <button type="button" class="word-remove" (click)="removeExcludedPrefix(p)" matTooltip="Remover">
+                    <mat-icon>close</mat-icon>
+                  </button>
+                </div>
+              }
+            </div>
+          }
+        }
+      }
+
+      <!-- ── FORÇAR TAGS ── -->
+      @if (section === 'forcartags') {
+        <div class="panel-header">
+          <mat-icon>skip_next</mat-icon>
+          <div>
+            <div class="panel-title">Forçar Tags</div>
+            <div class="panel-subtitle">Controlo do comportamento de mapeamento por IA</div>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field-label">
+            <span class="field-name">Ignorar produtos já mapeados</span>
+            <span class="field-desc">Quando ativo, a IA ignora produtos com mapeamento concluído, acelerando o processo.</span>
+          </div>
+          <mat-slide-toggle
+            [checked]="skipMapped"
+            (change)="toggleSkipMapped($any($event).checked)"
+            color="primary">
+          </mat-slide-toggle>
+        </div>
+      }
+
+      <!-- ── PROMPT AI ── -->
+      @if (section === 'prompt') {
+        <div class="panel-header">
+          <mat-icon>edit_note</mat-icon>
+          <div>
+            <div class="panel-title">Prompt AI</div>
+            <div class="panel-subtitle">Instruções adicionais acrescentadas ao prompt de popular tags</div>
+          </div>
+        </div>
+
+        @if (promptLoading) {
+          <div class="words-loading">
+            <mat-progress-spinner diameter="28" mode="indeterminate"></mat-progress-spinner>
+            <span>A carregar…</span>
+          </div>
+        } @else {
+          <div class="prompt-card">
+            <textarea class="prompt-textarea"
+                      [(ngModel)]="customPromptInstructions"
+                      placeholder="Ex: Quando o produto for da marca Apple, preenche sempre o campo Marca com 'Apple'."
+                      rows="10"></textarea>
+            <div class="prompt-card-footer">
+              <span class="prompt-hint">Adicionado ao final do prompt base da IA em todas as operações de popular tags.</span>
+              <button class="prompt-save-btn" type="button"
+                      (click)="saveCustomPrompt()"
+                      [disabled]="promptSaving">
+                @if (promptSaving) {
+                  <mat-progress-spinner diameter="14" mode="indeterminate" class="btn-spinner"></mat-progress-spinner>
+                } @else {
+                  <mat-icon>check</mat-icon>
+                }
+                <span>{{ promptSaving ? 'A guardar…' : 'Guardar' }}</span>
+              </button>
+            </div>
+          </div>
+        }
+      }
+
+      <!-- ── LIGAÇÕES ── -->
+      @if (section === 'ligacoes') {
+        <div class="panel-header">
+          <mat-icon>cable</mat-icon>
+          <div>
+            <div class="panel-title">Ligações</div>
+            <div class="panel-subtitle">Credenciais de acesso ao Shopify, Suprides e OpenAI</div>
+          </div>
+        </div>
+
+        @if (connLoading) {
+          <div class="words-loading">
+            <mat-progress-spinner diameter="28" mode="indeterminate"></mat-progress-spinner>
+            <span>A carregar…</span>
+          </div>
+        } @else {
+          <div class="conn-section-title">Shopify</div>
+          <div class="conn-field">
+            <label>Domínio da loja</label>
+            <input class="conn-input" type="text" [(ngModel)]="conn.shopifyStore" placeholder="exemplo.myshopify.com">
+          </div>
+          <div class="conn-field">
+            <label>Access Token</label>
+            <input class="conn-input" type="password" [(ngModel)]="conn.shopifyToken" placeholder="shpat_…">
+          </div>
+          <div class="conn-field">
+            <label>Location ID</label>
+            <input class="conn-input" type="text" [(ngModel)]="conn.shopifyLocationId" placeholder="12345678901">
+          </div>
+
+          <div class="conn-section-title" style="margin-top:20px">Suprides API</div>
+          <div class="conn-field">
+            <label>URL</label>
+            <input class="conn-input" type="text" [(ngModel)]="conn.supridesUrl" placeholder="https://www.suprides.pt/rest/…">
+          </div>
+          <div class="conn-field">
+            <label>Utilizador</label>
+            <input class="conn-input" type="text" [(ngModel)]="conn.supridesUser" placeholder="email@empresa.pt">
+          </div>
+          <div class="conn-field">
+            <label>Password</label>
+            <input class="conn-input" type="password" [(ngModel)]="conn.supridesPass" placeholder="••••••••">
+          </div>
+          <div class="conn-field">
+            <label>Token</label>
+            <input class="conn-input" type="password" [(ngModel)]="conn.supridesToken" placeholder="token…">
+          </div>
+
+          <div class="conn-section-title" style="margin-top:20px">OpenAI</div>
+          <div class="conn-field">
+            <label>API Key</label>
+            <input class="conn-input" type="password" [(ngModel)]="conn.openaiApiKey" placeholder="sk-proj-…">
+          </div>
+
+          <div class="conn-actions">
+            <button class="prompt-save-btn" type="button" (click)="saveConn()" [disabled]="connSaving">
+              @if (connSaving) {
+                <mat-progress-spinner diameter="14" mode="indeterminate" class="btn-spinner"></mat-progress-spinner>
+              } @else {
+                <mat-icon>check</mat-icon>
+              }
+              <span>{{ connSaving ? 'A guardar…' : 'Guardar' }}</span>
+            </button>
+          </div>
+        }
+      }
+
+    </div>
+
+    <!-- ── AÇÕES ── -->
+    <div class="prefs-actions">
+      <span class="spacer"></span>
+      <button mat-button type="button" (click)="close()">Fechar</button>
+    </div>
+
+  </div>
+
+</div>

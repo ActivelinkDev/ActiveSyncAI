@@ -1,0 +1,205 @@
+<div class="dash-wrap">
+
+  @if (loading) {
+    <div class="dash-loading">
+      <mat-spinner diameter="40"></mat-spinner>
+    </div>
+  }
+
+  @if (!loading && data) {
+    <!-- HEADER -->
+    <div class="dash-header">
+      <h1 class="dash-title">Dashboard</h1>
+      <button mat-icon-button (click)="load()" matTooltip="Atualizar">
+        <mat-icon>refresh</mat-icon>
+      </button>
+    </div>
+
+    <!-- KPI ROW -->
+    <div class="kpi-row">
+      <div class="kpi-card kpi-hero">
+        <div class="kpi-icon"><mat-icon>inventory_2</mat-icon></div>
+        <div class="kpi-body">
+          <span class="kpi-value">{{ data.totalProducts | number }}</span>
+          <span class="kpi-label">Total Produtos</span>
+        </div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-icon kpi-icon--green"><mat-icon>cloud_done</mat-icon></div>
+        <div class="kpi-body">
+          <span class="kpi-value">{{ data.syncedProducts | number }}</span>
+          <span class="kpi-label">No Shopify</span>
+          <span class="kpi-sub">{{ syncedPct }}% sincronizados</span>
+        </div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-icon kpi-icon--blue"><mat-icon>label</mat-icon></div>
+        <div class="kpi-body">
+          <span class="kpi-value">{{ data.tagCoverage }}%</span>
+          <span class="kpi-label">Cobertura Tags</span>
+          <span class="kpi-sub">{{ data.productsWithTags | number }} com tags</span>
+        </div>
+      </div>
+
+      <div class="kpi-card"
+           [class.kpi-card--ok]="data.lastSyncStatus === 'ok'"
+           [class.kpi-card--err]="data.lastSyncStatus === 'error'">
+        <div class="kpi-icon"
+             [class.kpi-icon--ok]="data.lastSyncStatus === 'ok'"
+             [class.kpi-icon--err]="data.lastSyncStatus === 'error'">
+          <mat-icon>{{ data.lastSyncStatus === 'error' ? 'error_outline' : 'sync' }}</mat-icon>
+        </div>
+        <div class="kpi-body">
+          <span class="kpi-value kpi-value--sm">{{ lastSyncLabel }}</span>
+          <span class="kpi-label">Último Sync</span>
+          <span class="kpi-sub"
+                [class.kpi-sub--ok]="data.lastSyncStatus === 'ok'"
+                [class.kpi-sub--err]="data.lastSyncStatus === 'error'">
+            {{ data.lastSyncStatus === 'ok' ? 'Sucesso' : data.lastSyncStatus === 'error' ? 'Com erros' : 'Nunca sincronizado' }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN ROW -->
+    <div class="main-row">
+
+      <!-- ANÉIS DE ESTADO -->
+      <div class="panel panel-rings">
+        <h3 class="panel-title">Estado de Sincronização</h3>
+        <div class="rings-row">
+          <div class="ring-item">
+            <svg viewBox="0 0 120 120" class="ring-svg">
+              <circle cx="60" cy="60" r="54" fill="none" stroke="#f0f0f0" stroke-width="10"/>
+              <circle cx="60" cy="60" r="54" fill="none" stroke="#10B981" stroke-width="10"
+                [attr.stroke-dasharray]="339.29"
+                [attr.stroke-dashoffset]="syncRingOffset"
+                stroke-linecap="round"
+                transform="rotate(-90 60 60)"/>
+            </svg>
+            <div class="ring-label">
+              <span class="ring-pct">{{ syncedPct }}%</span>
+              <span class="ring-name">No Shopify</span>
+            </div>
+          </div>
+          <div class="ring-item">
+            <svg viewBox="0 0 120 120" class="ring-svg">
+              <circle cx="60" cy="60" r="54" fill="none" stroke="#f0f0f0" stroke-width="10"/>
+              <circle cx="60" cy="60" r="54" fill="none" stroke="#3B82F6" stroke-width="10"
+                [attr.stroke-dasharray]="339.29"
+                [attr.stroke-dashoffset]="tagRingOffset"
+                stroke-linecap="round"
+                transform="rotate(-90 60 60)"/>
+            </svg>
+            <div class="ring-label">
+              <span class="ring-pct">{{ data.tagCoverage }}%</span>
+              <span class="ring-name">Tags</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ring-stats">
+          <div class="ring-stat">
+            <span class="ring-stat-val">{{ data.syncedProducts | number }}</span>
+            <span class="ring-stat-lbl">Sincronizados</span>
+          </div>
+          <div class="ring-stat">
+            <span class="ring-stat-val">{{ data.totalProducts - data.syncedProducts | number }}</span>
+            <span class="ring-stat-lbl">Por sincronizar</span>
+          </div>
+          <div class="ring-stat">
+            <span class="ring-stat-val">{{ data.productsWithTags | number }}</span>
+            <span class="ring-stat-lbl">Com tags</span>
+          </div>
+          <div class="ring-stat">
+            <span class="ring-stat-val">{{ data.totalProducts - data.productsWithTags | number }}</span>
+            <span class="ring-stat-lbl">Sem tags</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- DONUT POR LINHA -->
+      <div class="panel panel-donut">
+        <h3 class="panel-title">Produtos por Linha</h3>
+        <div class="donut-wrap">
+          <canvas #donutCanvas></canvas>
+        </div>
+        <div class="donut-legend">
+          @for (item of data.byProductLine.slice(0, 6); track item.name; let i = $index) {
+            <div class="legend-row">
+              <span class="legend-dot" [style.background]="'hsl(' + (i * 36) + ',70%,55%)'"></span>
+              <span class="legend-name" [title]="item.name">{{ item.name }}</span>
+              <span class="legend-count">{{ item.count }}</span>
+            </div>
+          }
+        </div>
+      </div>
+
+      <!-- TOP FAMÍLIAS -->
+      <div class="panel panel-families">
+        <h3 class="panel-title">Top Famílias</h3>
+        <div class="family-list">
+          @for (fam of data.byFamily.slice(0, 8); track fam.name) {
+            <div class="family-row">
+              <span class="family-name" [title]="fam.name">{{ fam.name }}</span>
+              <div class="family-bar-wrap">
+                <div class="family-bar"
+                  [style.width.%]="data.byFamily[0].count ? (fam.count / data.byFamily[0].count) * 100 : 0">
+                </div>
+              </div>
+              <span class="family-count">{{ fam.count }}</span>
+            </div>
+          }
+        </div>
+      </div>
+
+    </div>
+
+    <!-- AGENDAMENTO -->
+    <div class="panel panel-sched">
+      <h3 class="panel-title">Sincronização automática</h3>
+      @if (sched) {
+        <div class="sched-grid">
+          <div class="sched-item">
+            <span class="sched-lbl">Estado</span>
+            <span class="sched-val" [class.sched-val--ok]="sched.enabled" [class.sched-val--muted]="!sched.enabled">
+              {{ sched.enabled ? 'Ligada (diária às ' + sched.time + ')' : 'Desligada' }}
+            </span>
+          </div>
+          <div class="sched-item">
+            <span class="sched-lbl">Próxima execução</span>
+            <span class="sched-val">{{ sched.nextRunAt ? (sched.nextRunAt | date:'dd/MM/yyyy HH:mm') : '—' }}</span>
+          </div>
+          <div class="sched-item">
+            <span class="sched-lbl">Agora</span>
+            <span class="sched-val">{{ schedActivity }}</span>
+          </div>
+          <div class="sched-item">
+            <span class="sched-lbl">Última execução</span>
+            @if (sched.lastRun) {
+              <span class="sched-val" [class.sched-val--ok]="sched.lastRun.ok" [class.sched-val--err]="!sched.lastRun.ok">
+                {{ sched.lastRun.startedAt | date:'dd/MM/yyyy HH:mm' }} · {{ sched.lastRun.ok ? 'OK' : 'Falhou' }}
+              </span>
+              <span class="sched-sub">{{ lastRunSummary }}</span>
+            } @else {
+              <span class="sched-val sched-val--muted">Nenhuma</span>
+            }
+          </div>
+        </div>
+      } @else {
+        <p class="sched-sub">Estado do agendamento indisponível.</p>
+      }
+    </div>
+  }
+
+  @if (!loading && !data) {
+    <div class="dash-error">
+      <mat-icon>error_outline</mat-icon>
+      <p>Não foi possível carregar o dashboard.</p>
+      <button mat-stroked-button (click)="load()">Tentar novamente</button>
+    </div>
+  }
+
+</div>

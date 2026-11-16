@@ -1,0 +1,221 @@
+@import '@angular/material/prebuilt-themes/indigo-pink.css';
+
+html, body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  font-family: Inter, Roboto, Arial, sans-serif;
+}
+
+.sidenav-container {
+  height: 100%;
+}
+
+.content {
+  padding: 20px;
+}
+
+.mapping-dialog-panel .mat-mdc-dialog-surface {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+
+/* === Dialog: altura fixa e sem scroll fantasma === */
+.b2b-dialog .mat-mdc-dialog-surface,
+.b2b-dialog .mdc-dialog__surface {
+  display: flex;
+  flex-direction: column;
+  height: 85vh;
+  max-height: 85vh;
+  overflow: hidden;              /* impede scroll na surface */
+  box-sizing: border-box;
+}
+
+/* O content NÃO scrolla. É só um flex item. */
+.b2b-dialog .mat-mdc-dialog-content,
+.b2b-dialog .mdc-dialog__content {
+  flex: 1 1 0;
+  min-height: 0;                 /* IMPORTANTÍSSIMO p/ o flex não estourar */
+  overflow: hidden !important;   /* mata a 2ª barra */
+  padding: 0 !important;
+}
+
+/* A barra de ações não participa do scroll */
+.b2b-dialog .mat-mdc-dialog-actions {
+  flex: 0 0 auto;
+  padding: 8px 20px 12px;        /* respiro nas actions */
+}
+
+/* O ÚNICO scroll fica na tabela / conteúdo interno */
+.b2b-dialog .dialog-content {
+  flex: 1 1 0;
+  min-height: 0;                 /* evita overflows do flex container */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0 20px 12px;          /* margem lateral/baixo global */
+}
+
+.b2b-dialog .categorias-table {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;              /* único scroll vertical */
+  overflow-x: auto;              /* horizontal se necessário */
+  margin-top: 6px;               /* espaço entre toolbar e tabela */
+}
+
+/* opcional: se o overlay (pane) estiver a criar scroll, corta aqui também */
+.b2b-dialog.cdk-overlay-pane,
+.b2b-dialog .cdk-overlay-pane {
+  max-height: 100vh;
+  overflow: visible;
+}
+
+/* === Resultados Mapeamento: ocupa quase tudo o ecrã === */
+.resultados-dialog .mat-mdc-dialog-surface,
+.resultados-dialog .mdc-dialog__surface {
+  height: 92vh !important;
+  max-height: 92vh !important;
+  padding: 0 !important;
+}
+
+/* ============================================================
+   B2B MAPEAMENTOS – TABS “PILL” COM HIGHLIGHT FORTE NA ATIVA
+   ============================================================ */
+
+:root{
+  --tab-active-bg: #3b82f6;  /* cor da tab ativa */
+  --tab-active-fg: #ffffff;
+  --tab-hover-bg: rgba(59,130,246,.10);
+}
+
+/* header das tabs alinhado com o conteúdo */
+.b2b-dialog .b2b-mapping-tabs .mat-mdc-tab-header{
+  padding: 0 24px;
+  border-bottom: 1px solid rgba(0,0,0,.06);
+}
+
+/* cada tab vira uma pill */
+.b2b-dialog .b2b-mapping-tabs .mat-mdc-tab{
+  min-width: auto;
+  margin-right: 8px;
+  padding: 0 24px;
+  border-radius: 999px;
+  text-transform: none;
+  transition:
+    background-color .15s ease,
+    color .15s ease,
+    box-shadow .15s ease,
+    transform .1s ease;
+}
+
+/* hover nas não ativas */
+.b2b-dialog .b2b-mapping-tabs .mat-mdc-tab:not([aria-selected="true"]):hover{
+  background: var(--tab-hover-bg);
+}
+
+/* texto mais forte sempre */
+.b2b-dialog .b2b-mapping-tabs .mat-mdc-tab .mdc-tab__text-label{
+  font-weight: 700;
+}
+
+/* ESTADO ATIVO – fica sempre escuro, independentemente do tema */
+.b2b-dialog .b2b-mapping-tabs .mat-mdc-tab[aria-selected="true"]{
+  background: var(--tab-active-bg) !important;
+  color: var(--tab-active-fg) !important;
+  box-shadow: 0 6px 16px rgba(59,130,246,.35);
+  transform: translateY(-1px);
+}
+
+.b2b-dialog .b2b-mapping-tabs .mat-mdc-tab[aria-selected="true"] .mdc-tab__text-label{
+  color: var(--tab-active-fg) !important;
+}
+
+/* remove o ink-bar por baixo do texto */
+.b2b-dialog .b2b-mapping-tabs
+  .mat-mdc-tab.mdc-tab--active
+  .mdc-tab-indicator__content--underline{
+  background: transparent !important;
+}
+
+
+/* ============================================================
+   B2C DIALOG – full-height, no padding, borderless surface
+   ============================================================ */
+
+.b2c-full-dialog .mat-mdc-dialog-surface,
+.b2c-full-dialog .mdc-dialog__surface {
+  padding: 0 !important;
+  border-radius: 16px !important;
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+  height: 92vh;
+  max-height: 92vh;
+  background: transparent !important;
+}
+
+.b2c-full-dialog .mat-mdc-dialog-content,
+.b2c-full-dialog .mdc-dialog__content {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden !important;
+  padding: 0 !important;
+}
+
+/* ============================================================
+   SUPRIDES DIALOGS – full-height, no padding, dark surface
+   ============================================================ */
+
+.suprides-mapeamento-dialog .mat-mdc-dialog-surface,
+.suprides-mapeamento-dialog .mdc-dialog__surface,
+.suprides-margens-dialog .mat-mdc-dialog-surface,
+.suprides-margens-dialog .mdc-dialog__surface {
+  padding: 0 !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+  background: #fff !important;
+}
+
+.suprides-mapeamento-dialog .mat-mdc-dialog-content,
+.suprides-mapeamento-dialog .mdc-dialog__content,
+.suprides-margens-dialog .mat-mdc-dialog-content,
+.suprides-margens-dialog .mdc-dialog__content {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden !important;
+  padding: 0 !important;
+}
+
+/* SearchableSelectComponent panel styles are in the component SCSS */
+
+/* ============================================================
+   IMPORTAÇÃO B2B – HEADER STICKY NA TABELA DE CAMPOS
+   (dialog com panelClass: 'mapping-dialog-panel')
+   ============================================================ */
+
+/* Garantir que o content é o scroll container principal */
+.mapping-dialog-panel .mat-mdc-dialog-content {
+  max-height: 80vh;   /* podes ajustar se quiseres */
+  overflow: auto;
+}
+
+/* Sticky por célula de header – mais fiável em mat-table */
+.mapping-dialog-panel .map-table .mat-mdc-header-cell {
+  position: sticky;
+  top: 0;                        /* cola mesmo encostado ao título */
+  z-index: 2;
+  background: #f5f5f5;
+}
+
+/* (opcional) sombra subtil quando está colado */
+.mapping-dialog-panel .map-table .mat-mdc-header-cell {
+  box-shadow: 0 2px 4px rgba(0,0,0,.04);
+}

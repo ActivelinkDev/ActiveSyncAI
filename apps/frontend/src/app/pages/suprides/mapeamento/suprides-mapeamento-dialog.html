@@ -1,0 +1,656 @@
+<div class="sd-dialog">
+
+  <!-- CASCADE TOAST -->
+  <div class="cascade-toast" *ngIf="cascadeToast">
+    <mat-icon>auto_awesome</mat-icon>
+    {{ cascadeToast }}
+  </div>
+
+  <!-- HEADER -->
+  <div class="sd-header">
+    <mat-icon class="sd-header-icon">electrical_services</mat-icon>
+    <span class="sd-header-title">Mapeamentos Shopify · {{ activeSupplierLabel }}</span>
+
+    <div class="sd-header-badges" *ngIf="!loading && !error">
+      <span class="badge active" *ngIf="totalMappedCount > 0">{{ totalMappedCount }} coleções mapeadas</span>
+      <span class="badge draft" *ngIf="hasDraft" matTooltip="Existe um rascunho não guardado no browser">
+        <mat-icon style="font-size:11px;width:11px;height:11px">edit</mat-icon> rascunho
+      </span>
+    </div>
+
+    <div class="sd-header-actions">
+      <button mat-icon-button [matTooltip]="'Atualizar catalogo ' + activeSupplierLabel" (click)="refreshCache()" [disabled]="loading">
+        <mat-icon>refresh</mat-icon>
+      </button>
+      <button mat-icon-button matTooltip="Fechar" (click)="closeDialog()">
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <!-- LOADING -->
+  <div class="sd-loading" *ngIf="loading">
+    <mat-progress-bar mode="indeterminate" color="primary"></mat-progress-bar>
+    <span>A carregar dados…</span>
+  </div>
+
+  <!-- ERROR -->
+  <div class="sd-error" *ngIf="error && !loading && reviewPhase === 'idle'">
+    <mat-icon>error_outline</mat-icon>
+    <span>{{ error }}</span>
+  </div>
+
+  <!-- BODY -->
+  <div class="sd-body" *ngIf="!loading && !error">
+    <mat-tab-group class="supplier-tabs" [selectedIndex]="supplierIndex" (selectedIndexChange)="onSupplierTabChange($event)" animationDuration="120ms">
+      <mat-tab label="Suprides"></mat-tab>
+      <mat-tab label="Esprinet"></mat-tab>
+    </mat-tab-group>
+
+    <mat-tab-group class="sd-tabs" animationDuration="150ms" (selectedTabChange)="onTabChange($event.index)">
+
+      <!-- ── TAB: MENU (Shopify L1 ↔ Suprides Linhas) ── -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon style="font-size:15px;width:15px;height:15px;margin-right:5px">linear_scale</mat-icon>
+          Menu
+        </ng-template>
+
+        <div class="cmap-wrap">
+          <div class="cmap-no-data" *ngIf="menuRows.length === 0">
+            <mat-icon>account_tree</mat-icon>
+            <span>Sem dados do menu Shopify. Verifica a configuração no tab "Gerir Menu".</span>
+          </div>
+
+          <div class="cmap-list" *ngIf="menuRows.length > 0">
+            <div class="cmap-search-bar">
+              <mat-icon class="cmap-search-icon">search</mat-icon>
+              <input class="cmap-search-input" [(ngModel)]="menuSearch" placeholder="Pesquisar coleções…" autocomplete="off">
+              <button class="cmap-search-clear" *ngIf="menuSearch" (click)="menuSearch = ''"><mat-icon>close</mat-icon></button>
+            </div>
+            <div class="cmap-list-header">
+              <span class="cmap-col-shopify">Coleção Shopify (nível 1)</span>
+              <span class="cmap-col-suprides">Linhas {{ activeSupplierLabel }} associadas</span>
+              <div class="cmap-expand-btns">
+                <button mat-icon-button matTooltip="Selecionar tudo" (click)="activateAll(menuRows)"><mat-icon>select_all</mat-icon></button>
+                <button mat-icon-button matTooltip="Desselecionar tudo" (click)="deactivateAll(menuRows)"><mat-icon>deselect</mat-icon></button>
+              </div>
+            </div>
+
+            <div class="cmap-row" [class.cmap-row--inactive]="row.hidden" *ngFor="let row of filteredMenuRows">
+              <div class="cmap-row-left">
+                <button class="cmap-active-toggle" [class.cmap-active-toggle--on]="!row.hidden"
+                  [matTooltip]="row.hidden ? 'Inativo — clique para incluir na sincronização' : 'Ativo — clique para excluir da sincronização'"
+                  (click)="toggleActive(row)">
+                  <mat-icon>{{ row.hidden ? 'radio_button_unchecked' : 'check_circle' }}</mat-icon>
+                </button>
+                <mat-icon class="cmap-icon" style="color:#3b82f6">shopping_bag</mat-icon>
+                <span class="cmap-title">{{ row.title }}</span>
+                <span class="cmap-badge" *ngIf="row.mappedItems.length">{{ row.mappedItems.length }}</span>
+              </div>
+              <div class="cmap-row-right">
+                <app-tag-multi-select
+                  [options]="row.availableOptions"
+                  [value]="row.mappedItems"
+                  [placeholder]="'Associar linhas ' + activeSupplierLabel + '...'"
+                  (valueChange)="onMenuRowChange(row, $event)"
+                  (tryAddItem)="onTryAdd($event, row, menuRows, onMenuRowChange.bind(this))">
+                </app-tag-multi-select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- ── TAB: FAMÍLIA (Shopify L2 ↔ Suprides Linhas) ── -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon style="font-size:15px;width:15px;height:15px;margin-right:5px">folder_open</mat-icon>
+          Família
+        </ng-template>
+
+        <div class="cmap-wrap">
+          <div class="cmap-no-data" *ngIf="familiaGroups.length === 0">
+            <mat-icon>folder_open</mat-icon>
+            <span>Sem famílias no menu Shopify. Adiciona coleções de nível 2 no tab "Gerir Menu".</span>
+          </div>
+
+          <div class="cmap-accordion" *ngIf="familiaGroups.length > 0">
+            <div class="cmap-search-bar">
+              <mat-icon class="cmap-search-icon">search</mat-icon>
+              <input class="cmap-search-input" [(ngModel)]="familiaSearch" placeholder="Pesquisar famílias…" autocomplete="off">
+              <button class="cmap-search-clear" *ngIf="familiaSearch" (click)="familiaSearch = ''"><mat-icon>close</mat-icon></button>
+            </div>
+            <div class="cmap-list-header">
+              <span class="cmap-col-shopify">Coleção Shopify (nível 2)</span>
+              <span class="cmap-col-suprides">Linhas {{ activeSupplierLabel }} associadas</span>
+              <div class="cmap-expand-btns">
+                <button mat-icon-button matTooltip="Expandir tudo" (click)="expandAllFamilias()"><mat-icon>unfold_more</mat-icon></button>
+                <button mat-icon-button matTooltip="Colapsar tudo" (click)="collapseAllFamilias()"><mat-icon>unfold_less</mat-icon></button>
+                <span class="cmap-btn-sep"></span>
+                <button mat-icon-button matTooltip="Selecionar tudo" (click)="activateAll(familiaRows)"><mat-icon>select_all</mat-icon></button>
+                <button mat-icon-button matTooltip="Desselecionar tudo" (click)="deactivateAll(familiaRows)"><mat-icon>deselect</mat-icon></button>
+              </div>
+            </div>
+
+            <ng-container *ngFor="let group of filteredFamiliaGroups">
+              <!-- Group header (L1) -->
+              <div class="cmap-group-hdr" (click)="toggleFamiliaGroup(group.l1CollId)">
+                <mat-icon class="cmap-group-chevron">
+                  {{ expandedFamiliaGroups.has(group.l1CollId) ? 'expand_more' : 'chevron_right' }}
+                </mat-icon>
+                <mat-icon class="cmap-group-icon" style="color:#3b82f6">shopping_bag</mat-icon>
+                <span class="cmap-group-title">{{ group.l1Title }}</span>
+                <span class="cmap-group-stats">
+                  {{ familiaGroupMappedCount(group) }}/{{ group.rows.length }} mapeadas
+                </span>
+              </div>
+
+              <!-- Group rows (L2) -->
+              <ng-container *ngIf="expandedFamiliaGroups.has(group.l1CollId)">
+                <div class="cmap-row cmap-row--indented" [class.cmap-row--inactive]="row.hidden" *ngFor="let row of group.rows">
+                  <div class="cmap-row-left">
+                    <span class="cmap-indent-line"></span>
+                    <button class="cmap-active-toggle" [class.cmap-active-toggle--on]="!row.hidden"
+                      [matTooltip]="row.hidden ? 'Inativo — clique para incluir' : 'Ativo — clique para excluir'"
+                      (click)="toggleActive(row)">
+                      <mat-icon>{{ row.hidden ? 'radio_button_unchecked' : 'check_circle' }}</mat-icon>
+                    </button>
+                    <mat-icon class="cmap-icon" style="color:#16a34a">folder_open</mat-icon>
+                    <span class="cmap-title">{{ row.title }}</span>
+                    <span class="cmap-badge" *ngIf="row.mappedItems.length">{{ row.mappedItems.length }}</span>
+                  </div>
+                  <div class="cmap-row-right">
+                    <app-tag-multi-select
+                      [options]="row.availableOptions"
+                      [value]="row.mappedItems"
+                      [placeholder]="'Associar linhas ' + activeSupplierLabel + '...'"
+                      (valueChange)="onFamiliaRowChange(row, $event)"
+                      (tryAddItem)="onTryAdd($event, row, familiaRows, onFamiliaRowChange.bind(this))">
+                    </app-tag-multi-select>
+                  </div>
+                </div>
+              </ng-container>
+            </ng-container>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- ── TAB: SUBFAMÍLIA (Shopify L3 ↔ Suprides Famílias) ── -->
+      <mat-tab *ngIf="!isEsprinet">
+        <ng-template mat-tab-label>
+          <mat-icon style="font-size:15px;width:15px;height:15px;margin-right:5px">label_outline</mat-icon>
+          Subfamília
+        </ng-template>
+
+        <div class="cmap-wrap">
+          <div class="cmap-no-data" *ngIf="subfamiliaGroups.length === 0">
+            <mat-icon>label_outline</mat-icon>
+            <span>Sem subfamílias no menu Shopify. Adiciona coleções de nível 3 no tab "Gerir Menu".</span>
+          </div>
+
+          <div class="cmap-accordion" *ngIf="subfamiliaGroups.length > 0">
+            <div class="cmap-search-bar">
+              <mat-icon class="cmap-search-icon">search</mat-icon>
+              <input class="cmap-search-input" [(ngModel)]="subfamiliaSearch" placeholder="Pesquisar subfamílias…" autocomplete="off">
+              <button class="cmap-search-clear" *ngIf="subfamiliaSearch" (click)="subfamiliaSearch = ''"><mat-icon>close</mat-icon></button>
+            </div>
+            <div class="cmap-list-header">
+              <span class="cmap-col-shopify">Coleção Shopify (nível 3)</span>
+              <span class="cmap-col-suprides">Famílias {{ activeSupplierLabel }} associadas</span>
+              <div class="cmap-expand-btns">
+                <button mat-icon-button matTooltip="Expandir tudo" (click)="expandAllSubfamilias()"><mat-icon>unfold_more</mat-icon></button>
+                <button mat-icon-button matTooltip="Colapsar tudo" (click)="collapseAllSubfamilias()"><mat-icon>unfold_less</mat-icon></button>
+                <span class="cmap-btn-sep"></span>
+                <button mat-icon-button matTooltip="Selecionar tudo" (click)="activateAll(subfamiliaRows)"><mat-icon>select_all</mat-icon></button>
+                <button mat-icon-button matTooltip="Desselecionar tudo" (click)="deactivateAll(subfamiliaRows)"><mat-icon>deselect</mat-icon></button>
+              </div>
+            </div>
+
+            <ng-container *ngFor="let group of filteredSubfamiliaGroups">
+              <!-- Group header (L2, com contexto L1) -->
+              <div class="cmap-group-hdr" (click)="toggleSubfamiliaGroup(group.l2CollId)">
+                <mat-icon class="cmap-group-chevron">
+                  {{ expandedSubfamiliaGroups.has(group.l2CollId) ? 'expand_more' : 'chevron_right' }}
+                </mat-icon>
+                <span class="cmap-group-breadcrumb">{{ group.l1Title }}</span>
+                <mat-icon class="cmap-sep" style="color:#cbd5e1;font-size:14px;width:14px;height:14px">chevron_right</mat-icon>
+                <mat-icon class="cmap-group-icon" style="color:#16a34a">folder_open</mat-icon>
+                <span class="cmap-group-title">{{ group.l2Title }}</span>
+                <span class="cmap-group-stats">
+                  {{ subfamiliaGroupMappedCount(group) }}/{{ group.rows.length }} mapeadas
+                </span>
+              </div>
+
+              <!-- Group rows (L3) -->
+              <ng-container *ngIf="expandedSubfamiliaGroups.has(group.l2CollId)">
+                <div class="cmap-row cmap-row--indented" [class.cmap-row--inactive]="row.hidden" *ngFor="let row of group.rows">
+                  <div class="cmap-row-left">
+                    <span class="cmap-indent-line"></span>
+                    <button class="cmap-active-toggle" [class.cmap-active-toggle--on]="!row.hidden"
+                      [matTooltip]="row.hidden ? 'Inativo — clique para incluir' : 'Ativo — clique para excluir'"
+                      (click)="toggleActive(row)">
+                      <mat-icon>{{ row.hidden ? 'radio_button_unchecked' : 'check_circle' }}</mat-icon>
+                    </button>
+                    <mat-icon class="cmap-icon" style="color:#d97706">label_outline</mat-icon>
+                    <span class="cmap-title">{{ row.title }}</span>
+                    <span class="cmap-badge" *ngIf="row.mappedItems.length">{{ row.mappedItems.length }}</span>
+                  </div>
+                  <div class="cmap-row-right">
+                    <app-tag-multi-select
+                      [options]="row.availableOptions"
+                      [value]="row.mappedItems"
+                      [placeholder]="'Associar familias ' + activeSupplierLabel + '...'"
+                      (valueChange)="onSubfamiliaRowChange(row, $event)"
+                      (tryAddItem)="onTryAdd($event, row, subfamiliaRows, onSubfamiliaRowChange.bind(this))">
+                    </app-tag-multi-select>
+                  </div>
+                </div>
+              </ng-container>
+            </ng-container>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- ── TAB: GERIR MENU ── -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon style="font-size:15px;width:15px;height:15px;margin-right:5px">account_tree</mat-icon>
+          Gestor de Menu
+        </ng-template>
+
+        <div class="menu-miller-wrap">
+          <div class="sd-loading" *ngIf="menuLoading">
+            <mat-progress-bar mode="indeterminate" color="primary"></mat-progress-bar>
+            <span>A carregar menu do Shopify…</span>
+          </div>
+          <div class="sd-error" *ngIf="menuError && !menuLoading">
+            <mat-icon>error_outline</mat-icon>
+            <span>{{ menuError }}</span>
+          </div>
+
+          <ng-container *ngIf="!menuLoading">
+            <div class="menu-miller">
+
+              <!-- COLUNA 1: LINHAS -->
+              <div class="menu-col">
+                <div class="menu-col-head">
+                  <mat-icon class="menu-col-icon" style="color:#3b82f6">linear_scale</mat-icon>
+                  <span>Linhas</span>
+                  <button mat-icon-button class="menu-add-btn" matTooltip="Adicionar linha" (click)="startAdd('linha')">
+                    <mat-icon>add</mat-icon>
+                  </button>
+                </div>
+                <div class="menu-col-body">
+                  <div class="menu-add-row" *ngIf="addingAt === 'linha'">
+                    <input [(ngModel)]="newTitle" class="menu-add-input" placeholder="Nome da linha…"
+                      (keydown.enter)="confirmAdd()" (keydown.escape)="cancelAdd()" autofocus>
+                    <button mat-icon-button color="primary" (click)="confirmAdd()"><mat-icon>check</mat-icon></button>
+                    <button mat-icon-button (click)="cancelAdd()"><mat-icon>close</mat-icon></button>
+                  </div>
+
+                  <div cdkDropList class="menu-drop-list" (cdkDropListDropped)="dropLinha($event)">
+                    <div class="menu-col-item" *ngFor="let node of menuNodes"
+                      cdkDrag [cdkDragDisabled]="!!editingNode"
+                      [class.selected]="selectedLinha === node"
+                      (click)="selectLinha(node)">
+                      <ng-container *ngIf="editingNode === node; else dispLinha">
+                        <input [(ngModel)]="editingTitle" class="menu-edit-input"
+                          (keydown.enter)="confirmEdit()" (keydown.escape)="cancelEdit()"
+                          (click)="$event.stopPropagation()">
+                        <button mat-icon-button color="primary" (click)="confirmEdit();$event.stopPropagation()"><mat-icon>check</mat-icon></button>
+                        <button mat-icon-button (click)="cancelEdit();$event.stopPropagation()"><mat-icon>close</mat-icon></button>
+                      </ng-container>
+                      <ng-template #dispLinha>
+                        <mat-icon class="menu-drag-handle" cdkDragHandle>drag_indicator</mat-icon>
+                        <span class="menu-item-title">{{ node.title }}</span>
+                        <span class="menu-item-count" *ngIf="node.children.length">{{ node.children.length }}</span>
+                        <button mat-icon-button class="menu-act-btn" matTooltip="Renomear"
+                          (click)="startEdit(node);$event.stopPropagation()"><mat-icon>edit</mat-icon></button>
+                        <button mat-icon-button class="menu-act-btn menu-act-btn--del" matTooltip="Remover"
+                          (click)="removeLinha(node);$event.stopPropagation()"><mat-icon>delete_outline</mat-icon></button>
+                        <mat-icon class="menu-chevron" *ngIf="node.children.length">chevron_right</mat-icon>
+                      </ng-template>
+                      <div *cdkDragPlaceholder class="menu-drag-placeholder"></div>
+                    </div>
+                  </div>
+
+                  <div class="menu-col-empty" *ngIf="menuNodes.length === 0 && addingAt !== 'linha'">
+                    Sem linhas. Clique em + para adicionar.
+                  </div>
+                </div>
+              </div>
+
+              <!-- COLUNA 2: FAMÍLIAS -->
+              <div class="menu-col">
+                <div class="menu-col-head">
+                  <mat-icon class="menu-col-icon" style="color:#16a34a">folder_open</mat-icon>
+                  <span>Famílias</span>
+                  <button mat-icon-button class="menu-add-btn" matTooltip="Adicionar família"
+                    [disabled]="!selectedLinha" (click)="startAdd('familia')">
+                    <mat-icon>add</mat-icon>
+                  </button>
+                </div>
+                <div class="menu-col-body">
+                  <ng-container *ngIf="selectedLinha; else famPlaceholder">
+                    <div class="menu-add-row" *ngIf="addingAt === 'familia'">
+                      <input [(ngModel)]="newTitle" class="menu-add-input" placeholder="Nome da família…"
+                        (keydown.enter)="confirmAdd()" (keydown.escape)="cancelAdd()">
+                      <button mat-icon-button color="primary" (click)="confirmAdd()"><mat-icon>check</mat-icon></button>
+                      <button mat-icon-button (click)="cancelAdd()"><mat-icon>close</mat-icon></button>
+                    </div>
+
+                    <div cdkDropList class="menu-drop-list" (cdkDropListDropped)="dropFamilia($event)">
+                      <div class="menu-col-item" *ngFor="let node of selectedLinha.children"
+                        cdkDrag [cdkDragDisabled]="!!editingNode"
+                        [class.selected]="selectedFamilia === node"
+                        (click)="selectFamilia(node)">
+                        <ng-container *ngIf="editingNode === node; else dispFam">
+                          <input [(ngModel)]="editingTitle" class="menu-edit-input"
+                            (keydown.enter)="confirmEdit()" (keydown.escape)="cancelEdit()"
+                            (click)="$event.stopPropagation()">
+                          <button mat-icon-button color="primary" (click)="confirmEdit();$event.stopPropagation()"><mat-icon>check</mat-icon></button>
+                          <button mat-icon-button (click)="cancelEdit();$event.stopPropagation()"><mat-icon>close</mat-icon></button>
+                        </ng-container>
+                        <ng-template #dispFam>
+                          <mat-icon class="menu-drag-handle" cdkDragHandle>drag_indicator</mat-icon>
+                          <span class="menu-item-title">{{ node.title }}</span>
+                          <span class="menu-item-count" *ngIf="node.children.length">{{ node.children.length }}</span>
+                          <button mat-icon-button class="menu-act-btn" matTooltip="Renomear"
+                            (click)="startEdit(node);$event.stopPropagation()"><mat-icon>edit</mat-icon></button>
+                          <button mat-icon-button class="menu-act-btn menu-act-btn--del" matTooltip="Remover"
+                            (click)="removeFamilia(node);$event.stopPropagation()"><mat-icon>delete_outline</mat-icon></button>
+                          <mat-icon class="menu-chevron" *ngIf="node.children.length">chevron_right</mat-icon>
+                        </ng-template>
+                        <div *cdkDragPlaceholder class="menu-drag-placeholder"></div>
+                      </div>
+                    </div>
+
+                    <div class="menu-col-empty"
+                      *ngIf="selectedLinha.children.length === 0 && addingAt !== 'familia'">
+                      Sem famílias. Clique em + para adicionar.
+                    </div>
+                  </ng-container>
+                  <ng-template #famPlaceholder>
+                    <div class="menu-col-placeholder">← Selecione uma linha</div>
+                  </ng-template>
+                </div>
+              </div>
+
+              <!-- COLUNA 3: SUBFAMÍLIAS -->
+              <div class="menu-col">
+                <div class="menu-col-head">
+                  <mat-icon class="menu-col-icon" style="color:#d97706">label_outline</mat-icon>
+                  <span>Subfamílias</span>
+                  <button mat-icon-button class="menu-add-btn" matTooltip="Adicionar subfamília"
+                    [disabled]="!selectedFamilia" (click)="startAdd('subfamilia')">
+                    <mat-icon>add</mat-icon>
+                  </button>
+                </div>
+                <div class="menu-col-body">
+                  <ng-container *ngIf="selectedFamilia; else subPlaceholder">
+                    <div class="menu-add-row" *ngIf="addingAt === 'subfamilia'">
+                      <input [(ngModel)]="newTitle" class="menu-add-input" placeholder="Nome da subfamília…"
+                        (keydown.enter)="confirmAdd()" (keydown.escape)="cancelAdd()">
+                      <button mat-icon-button color="primary" (click)="confirmAdd()"><mat-icon>check</mat-icon></button>
+                      <button mat-icon-button (click)="cancelAdd()"><mat-icon>close</mat-icon></button>
+                    </div>
+
+                    <div cdkDropList class="menu-drop-list" (cdkDropListDropped)="dropSubfamilia($event)">
+                      <div class="menu-col-item" *ngFor="let node of selectedFamilia.children"
+                        cdkDrag [cdkDragDisabled]="!!editingNode">
+                        <ng-container *ngIf="editingNode === node; else dispSub">
+                          <input [(ngModel)]="editingTitle" class="menu-edit-input"
+                            (keydown.enter)="confirmEdit()" (keydown.escape)="cancelEdit()"
+                            (click)="$event.stopPropagation()">
+                          <button mat-icon-button color="primary" (click)="confirmEdit();$event.stopPropagation()"><mat-icon>check</mat-icon></button>
+                          <button mat-icon-button (click)="cancelEdit();$event.stopPropagation()"><mat-icon>close</mat-icon></button>
+                        </ng-container>
+                        <ng-template #dispSub>
+                          <mat-icon class="menu-drag-handle" cdkDragHandle>drag_indicator</mat-icon>
+                          <span class="menu-item-title">{{ node.title }}</span>
+                          <button mat-icon-button class="menu-act-btn" matTooltip="Renomear"
+                            (click)="startEdit(node);$event.stopPropagation()"><mat-icon>edit</mat-icon></button>
+                          <button mat-icon-button class="menu-act-btn menu-act-btn--del" matTooltip="Remover"
+                            (click)="removeSubfamilia(node);$event.stopPropagation()"><mat-icon>delete_outline</mat-icon></button>
+                        </ng-template>
+                        <div *cdkDragPlaceholder class="menu-drag-placeholder"></div>
+                      </div>
+                    </div>
+
+                    <div class="menu-col-empty"
+                      *ngIf="selectedFamilia.children.length === 0 && addingAt !== 'subfamilia'">
+                      Sem subfamílias. Clique em + para adicionar.
+                    </div>
+                  </ng-container>
+                  <ng-template #subPlaceholder>
+                    <div class="menu-col-placeholder">← Selecione uma família</div>
+                  </ng-template>
+                </div>
+              </div>
+
+            </div><!-- /menu-miller -->
+
+            <!-- Miller footer -->
+            <div class="menu-miller-footer">
+              <ng-container *ngIf="menuSyncResult">
+                <span class="menu-sync-ok" *ngIf="menuSyncResult.errors.length === 0">
+                  <mat-icon>check_circle</mat-icon>
+                  {{ menuSyncResult.created }} criadas · {{ menuSyncResult.renamed }} renomeadas
+                </span>
+                <span class="menu-sync-warn" *ngIf="menuSyncResult.errors.length > 0">
+                  <mat-icon>warning_amber</mat-icon>
+                  {{ menuSyncResult.errors.length }} erros
+                </span>
+              </ng-container>
+              <span class="menu-sync-ok" *ngIf="menuSaving">
+                <mat-icon class="spin">sync</mat-icon> A guardar…
+              </span>
+              <span class="menu-resolve-ok" *ngIf="menuResolveResult">
+                <mat-icon>link</mat-icon> {{ menuResolveResult.resolved }} IDs resolvidos
+              </span>
+              <div style="flex:1"></div>
+              <button class="btn-apple btn-apple--ghost" (click)="reloadMenu()">
+                <mat-icon>refresh</mat-icon> Recarregar
+              </button>
+              <button class="btn-apple btn-apple--secondary" [disabled]="menuResolvingIds || menuSyncing" (click)="resolveMenuIds()"
+                matTooltip="Preenche os IDs Shopify em falta sem alterar o menu">
+                <mat-icon [class.spin]="menuResolvingIds">{{ menuResolvingIds ? 'sync' : 'link' }}</mat-icon>
+                {{ menuResolvingIds ? 'A resolver…' : 'Resolver IDs' }}
+              </button>
+              <button class="btn-apple btn-apple--primary" [disabled]="menuSyncing || menuSaving" (click)="openSyncReview()">
+                <mat-icon [class.spin]="menuSyncing">{{ menuSyncing ? 'sync' : 'cloud_upload' }}</mat-icon>
+                {{ menuSyncing ? 'A integrar…' : 'Integrar no Shopify' }}
+              </button>
+              <button class="btn-apple btn-apple--ghost" (click)="closeDialog()">Fechar</button>
+            </div>
+            <!-- Progress bar (visible during sync) -->
+            <div class="menu-sync-progress" *ngIf="menuSyncing">
+              <div class="msp-phase">{{ menuSyncPhase }}</div>
+              <mat-progress-bar
+                [mode]="menuSyncTotal > 0 ? 'determinate' : 'indeterminate'"
+                [value]="menuSyncPercent"
+                color="primary">
+              </mat-progress-bar>
+              <div class="msp-count" *ngIf="menuSyncTotal > 0">{{ menuSyncDone }} / {{ menuSyncTotal }}</div>
+            </div>
+
+          </ng-container>
+
+        </div>
+      </mat-tab>
+
+    </mat-tab-group>
+  </div>
+
+  <!-- FOOTER (escondido na aba Gerir Menu) -->
+  <div class="sd-footer" *ngIf="!loading && !error && activeTabIndex !== (isEsprinet ? 2 : 3)">
+    <div class="sd-footer-left">
+      <span class="save-confirm" *ngIf="mappingSaved">
+        <mat-icon>check_circle</mat-icon> Guardado
+      </span>
+    </div>
+    <div class="sd-footer-right">
+      <button class="btn-apple btn-apple--ghost" (click)="closeDialog()">Fechar</button>
+      <button class="btn-apple btn-apple--secondary" [disabled]="savingMapping" (click)="save()">
+        <mat-icon>{{ savingMapping ? 'hourglass_empty' : 'save' }}</mat-icon>
+        {{ savingMapping ? 'A guardar…' : 'Guardar' }}
+      </button>
+      <button class="btn-apple btn-apple--secondary" (click)="resumeSync()" *ngIf="!isEsprinet"
+              matTooltip="Salta produtos já sincronizados e continua do ponto onde parou">
+        <mat-icon>skip_next</mat-icon> Continuar
+      </button>
+      <button class="btn-apple btn-apple--primary" (click)="startReview()" *ngIf="!isEsprinet">
+        <mat-icon>cloud_upload</mat-icon> Sincronizar
+      </button>
+    </div>
+  </div>
+
+  <!-- MENU SYNC REVIEW OVERLAY -->
+  <div class="sd-overlay" *ngIf="menuReviewing">
+    <div class="menu-review-card">
+      <div class="menu-review-header">
+        <mat-icon style="color:#059669">fact_check</mat-icon>
+        <span>Rever antes de integrar</span>
+      </div>
+
+      <p class="menu-review-sub">
+        Estes {{ totalNodeCount }} itens vão ser enviados ao Shopify como coleções e menu:
+      </p>
+
+      <div class="menu-review-tree">
+        <ng-container *ngFor="let linha of menuNodes">
+          <div class="mrt-linha">
+            <mat-icon style="color:#3b82f6;font-size:14px;width:14px;height:14px">linear_scale</mat-icon>
+            <span>{{ linha.title }}</span>
+            <span class="mrt-id" *ngIf="linha.shopifyId">#{{ linha.shopifyId }}</span>
+            <span class="mrt-new" *ngIf="!linha.shopifyId">novo</span>
+          </div>
+          <ng-container *ngFor="let fam of linha.children">
+            <div class="mrt-fam">
+              <mat-icon style="color:#16a34a;font-size:13px;width:13px;height:13px">folder_open</mat-icon>
+              <span>{{ fam.title }}</span>
+              <span class="mrt-id" *ngIf="fam.shopifyId">#{{ fam.shopifyId }}</span>
+              <span class="mrt-new" *ngIf="!fam.shopifyId">novo</span>
+            </div>
+            <div class="mrt-sub" *ngFor="let sub of fam.children">
+              <mat-icon style="color:#d97706;font-size:12px;width:12px;height:12px">label_outline</mat-icon>
+              <span>{{ sub.title }}</span>
+              <span class="mrt-id" *ngIf="sub.shopifyId">#{{ sub.shopifyId }}</span>
+              <span class="mrt-new" *ngIf="!sub.shopifyId">novo</span>
+            </div>
+          </ng-container>
+        </ng-container>
+        <div class="mrt-empty" *ngIf="menuNodes.length === 0">Sem itens no menu local.</div>
+      </div>
+
+      <div class="menu-review-footer">
+        <button class="btn-apple btn-apple--ghost" (click)="cancelSyncReview()">Cancelar</button>
+        <button class="btn-apple btn-apple--primary" (click)="confirmSync()" [disabled]="menuNodes.length === 0">
+          <mat-icon>cloud_upload</mat-icon> Confirmar e Integrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REVIEW OVERLAY -->
+  <div class="sd-overlay" *ngIf="reviewPhase !== 'idle'">
+    <div class="sd-review-card">
+
+      <ng-container *ngIf="reviewPhase === 'loading'">
+        <mat-icon class="review-icon spin">sync</mat-icon>
+        <h3>A preparar sincronização…</h3>
+        <mat-progress-bar mode="indeterminate" color="primary"></mat-progress-bar>
+      </ng-container>
+
+      <ng-container *ngIf="reviewPhase === 'review'">
+        <div class="review-header">
+          <mat-icon style="color:#059669">fact_check</mat-icon>
+          <span>Rever antes de sincronizar</span>
+        </div>
+
+        <p class="review-sub" *ngIf="syncReviewLines.length > 0">
+          {{ syncReviewProductCount }} produto(s) serão sincronizados em {{ syncReviewLines.length }} coleção(ões):
+        </p>
+        <p class="review-sub warn" *ngIf="syncReviewLines.length === 0">
+          Nenhum produto corresponde exatamente às seleções ativas.
+        </p>
+        <div class="sync-review-list" *ngIf="syncReviewLines.length > 0">
+          <div class="srw-row" *ngFor="let item of syncReviewLines">
+            <div class="srw-coll">
+              <mat-icon class="srw-icon">category</mat-icon>
+              <strong>{{ item.collTitle }}</strong>
+              <span class="srw-badge" *ngIf="item.level">{{ item.level }}</span>
+            </div>
+            <div class="srw-lines">
+              <span class="srw-tag" *ngFor="let l of item.lines">{{ l }}</span>
+            </div>
+            <div class="srw-counts" *ngIf="item.familiaCount > 0 || item.subfamiliaCount > 0">
+              <span *ngIf="item.familiaCount > 0" class="srw-badge">{{ item.familiaCount }} família(s)</span>
+              <span *ngIf="item.subfamiliaCount > 0" class="srw-badge">{{ item.subfamiliaCount }} subfamília(s)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="review-footer">
+          <button class="btn-apple btn-apple--ghost" (click)="cancelReview()">Cancelar</button>
+          <button class="btn-apple btn-apple--primary" [disabled]="syncReviewLines.length === 0" (click)="confirmAndSync()">
+            <mat-icon>cloud_upload</mat-icon> Confirmar e Sincronizar
+          </button>
+        </div>
+      </ng-container>
+
+      <ng-container *ngIf="reviewPhase === 'progress'">
+        <mat-icon class="review-icon spin">cloud_upload</mat-icon>
+        <h3>A sincronizar com o Shopify…</h3>
+        <ng-container *ngIf="syncProgress.phase === 'leitura'; else produtosPhase">
+          <p class="progress-text">A ler a loja e a guardar cópia de segurança…</p>
+          <mat-progress-bar mode="indeterminate" color="primary"></mat-progress-bar>
+        </ng-container>
+        <ng-template #produtosPhase>
+          <p class="progress-text">{{ syncProgress.done }} / {{ syncProgress.total || '?' }}</p>
+          <mat-progress-bar mode="determinate" [value]="progressPercent" color="primary"></mat-progress-bar>
+        </ng-template>
+        <p class="progress-sub" *ngIf="syncProgress.errors > 0">{{ syncProgress.errors }} erro(s)</p>
+        <button class="btn-apple btn-apple--ghost" style="margin-top:4px"
+          [disabled]="cancellingSync" (click)="cancelSync()">
+          <mat-icon style="font-size:15px;width:15px;height:15px">stop_circle</mat-icon>
+          {{ cancellingSync ? 'A cancelar…' : 'Cancelar sync' }}
+        </button>
+      </ng-container>
+
+      <ng-container *ngIf="reviewPhase === 'done' && syncResult">
+        <mat-icon class="review-icon ok">check_circle</mat-icon>
+        <h3>{{ syncResult.cancelled ? 'Sincronização cancelada' : 'Sincronização concluída' }}</h3>
+        <div class="result-grid">
+          <div class="result-cell">
+            <span class="result-val">{{ syncResult.created }}</span>
+            <span class="result-lbl">Criados</span>
+          </div>
+          <div class="result-cell">
+            <span class="result-val">{{ syncResult.updated }}</span>
+            <span class="result-lbl">Atualizados</span>
+          </div>
+          <div class="result-cell" *ngIf="syncResult.skippedNew">
+            <span class="result-val">{{ syncResult.skippedNew }}</span>
+            <span class="result-lbl">Novos ignorados</span>
+          </div>
+          <div class="result-cell warn" *ngIf="syncResult.errors.length > 0">
+            <span class="result-val">{{ syncResult.errors.length }}</span>
+            <span class="result-lbl">Erros</span>
+          </div>
+        </div>
+        <button class="btn-apple btn-apple--primary" (click)="cancelReview()">Fechar</button>
+      </ng-container>
+
+      <ng-container *ngIf="reviewPhase === 'error'">
+        <mat-icon class="review-icon err">error_outline</mat-icon>
+        <h3>Erro na sincronização</h3>
+        <p class="error-msg">{{ error }}</p>
+        <button class="btn-apple btn-apple--ghost" (click)="cancelReview()">Voltar</button>
+      </ng-container>
+
+    </div>
+  </div>
+
+</div>
