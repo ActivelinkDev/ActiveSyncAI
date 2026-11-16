@@ -5,8 +5,10 @@
 import axios, { AxiosInstance } from 'axios';
 import { loadConnectionSettings } from '../repositories/store';
 
-// Versão usada nas leituras GraphQL. A Etapa 2 unifica com SHOPIFY_API_VERSION.
-export const SHOPIFY_READ_API_VERSION = '2026-01';
+/** Versão única da Admin API (leituras e escritas). */
+export const SHOPIFY_API_VERSION = '2026-10';
+/** @deprecated usar SHOPIFY_API_VERSION */
+export const SHOPIFY_READ_API_VERSION = SHOPIFY_API_VERSION;
 
 const PAGE = 40; // mantém o custo da query bem abaixo do máximo por pedido
 
@@ -15,11 +17,12 @@ query($after: String, $q: String) {
   products(first: ${PAGE}, after: $after, query: $q) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      legacyResourceId title handle status vendor productType updatedAt descriptionHtml
+      legacyResourceId title handle status vendor productType updatedAt publishedAt descriptionHtml
       metafield(namespace: "custom", key: "stock_status") { value }
       variantsCount { count }
       variants(first: 1) { nodes {
-        legacyResourceId sku price compareAtPrice barcode
+        legacyResourceId sku price compareAtPrice
+        barcodes(first: 1) { nodes { value } }
         inventoryItem {
           legacyResourceId
           unitCost { amount }
@@ -33,7 +36,7 @@ query($after: String, $q: String) {
 
 export interface SnapshotProduct {
   productId: number; title: string; handle: string; status: string; vendor: string;
-  productType: string; updatedAt: string; descriptionHtml: string | null; stockStatus: string | null;
+  productType: string; updatedAt: string; publishedAt?: string | null; descriptionHtml: string | null; stockStatus: string | null;
   variantsCount: number;
   variantId: number | null; sku: string | null; price: string | null; compareAtPrice: string | null;
   barcode: string | null; inventoryItemId: number | null; cost: string | null;
@@ -110,12 +113,12 @@ export async function readAllProducts(onProgress?: (n: number) => void, search?:
       const w = v?.inventoryItem?.measurement?.weight;
       products.push({
         productId: Number(n.legacyResourceId), title: n.title, handle: n.handle, status: n.status,
-        vendor: n.vendor, productType: n.productType, updatedAt: n.updatedAt,
+        vendor: n.vendor, productType: n.productType, updatedAt: n.updatedAt, publishedAt: n.publishedAt ?? null,
         descriptionHtml: n.descriptionHtml ?? null,
         stockStatus: n.metafield?.value ?? null,
         variantsCount: n.variantsCount?.count ?? n.variants.nodes.length,
         variantId: v ? Number(v.legacyResourceId) : null, sku: v?.sku ?? null,
-        price: v?.price ?? null, compareAtPrice: v?.compareAtPrice ?? null, barcode: v?.barcode ?? null,
+        price: v?.price ?? null, compareAtPrice: v?.compareAtPrice ?? null, barcode: v?.barcodes?.nodes?.[0]?.value ?? null,
         inventoryItemId: v?.inventoryItem ? Number(v.inventoryItem.legacyResourceId) : null,
         cost: v?.inventoryItem?.unitCost?.amount ?? null,
         weight: w && w.value != null ? { unit: w.unit, value: Number(w.value) } : null,

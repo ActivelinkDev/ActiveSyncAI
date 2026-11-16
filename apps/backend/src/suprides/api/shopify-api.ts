@@ -1,156 +1,145 @@
 import axios from 'axios';
 import { loadConnectionSettings } from '../repositories/store';
+import { gql, makeGraphqlClient, SHOPIFY_API_VERSION } from './shopify-read';
 
-// Shared AbortController — aborted when sync is cancelled.
+export { SHOPIFY_API_VERSION };
+
+// Cancelamento: o sync verifica entre produtos (throwIfCancelled); estas funções mantêm-se
+// para compatibilidade com as rotas.
 let _abortController = new AbortController();
-
-export function resetSyncAbort(): void {
-  _abortController = new AbortController();
-}
-
-export function abortSync(): void {
-  _abortController.abort();
-}
-
-// Versão da Admin API usada pelo sync. A Etapa 2 (GraphQL) passa-a para a versão atual.
-export const SHOPIFY_API_VERSION = '2025-01';
+export function resetSyncAbort(): void { _abortController = new AbortController(); }
+export function abortSync(): void { _abortController.abort(); }
 
 export function getShopifyStore(): string {
   return loadConnectionSettings().shopifyStore || process.env.SHOPIFY_STORE || '';
 }
 
-function makeClients() {
-  const conn  = loadConnectionSettings();
-  const store = conn.shopifyStore  || process.env.SHOPIFY_STORE    || '';
-  const token = conn.shopifyToken  || process.env.SHOPIFY_PASSWORD || '';
-  const base   = `https://${store}/admin/api/${SHOPIFY_API_VERSION}/`;
-  const signal = _abortController.signal;
-
-  const rest = axios.create({
-    baseURL: base,
-    headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
-    timeout: 20_000,
-    signal,
-    validateStatus: (s: number) => (s >= 200 && s < 300) || s === 429 || s === 422 || s === 404,
-  });
-
-  const gqlClient = axios.create({
-    baseURL: `${base}graphql.json`,
-    headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
-    timeout: 120_000,
-    signal,
-    validateStatus: () => true,
-  });
-
-  return { rest, gqlClient };
-}
-
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-async function _requestWithRetry(
-  fn: () => Promise<any>,
-  desc: string,
-  tries = 5
-): Promise<any> {
-  let lastErr: unknown;
-  for (let i = 0; i < tries; i++) {
-    try {
-      const res = await fn();
-      if (res.status === 429) {
-        const ra = Number(res.headers?.['retry-after'] || 4);
-        await sleep((isNaN(ra) ? 4 : ra) * 1000);
-        continue;
-      }
-      if (res.status >= 200 && res.status < 300) return res;
-      const body = JSON.stringify(res.data ?? '').slice(0, 400);
-      const err = new Error(`${desc} falhou (${res.status}): ${body}`);
-      (err as any).response = res;
-      throw err;
-    } catch (e) {
-      if ((e as any)?.code === 'ERR_CANCELED' || (e as any)?.name === 'AbortError') throw e;
-      lastErr = e;
-      if (i < tries - 1) await sleep(1500 * (i + 1));
-    }
-  }
-  throw lastErr ?? new Error(`${desc} falhou após ${tries} tentativas`);
+/** GraphQL com novas tentativas e gestão do limite de pontos (ver shopify-read.gql). */
+async function graphql(query: string, variables: Record<string, unknown> = {}): Promise<any> {
+  return gql(makeGraphqlClient(), query, variables);
 }
 
-async function graphql(query: string, variables: Record<string, unknown> = {}, tries = 3): Promise<any> {
-  let lastErr: unknown;
-  for (let i = 0; i < tries; i++) {
-    const { gqlClient } = makeClients();
-    const res = await gqlClient.post('', { query, variables });
-    if (res.status === 429) {
-      const ra = Number(res.headers?.['retry-after'] || 2);
-      await sleep((isNaN(ra) ? 2 : ra) * 1000);
-      continue;
-    }
-    if (res.status === 500) {
-      lastErr = new Error(`Shopify GraphQL HTTP 500: ${JSON.stringify(res.data).slice(0, 300)}`);
-      await sleep(2000 * (i + 1));
-      continue;
-    }
-    if (res.status >= 400) {
-      throw new Error(`Shopify GraphQL HTTP ${res.status}: ${JSON.stringify(res.data).slice(0, 300)}`);
-    }
-    if (res.data?.errors) {
-      if (!res.data?.data) throw new Error(res.data.errors[0].message);
-      console.warn('[Shopify GraphQL] warnings:', JSON.stringify(res.data.errors));
-    }
-    return res.data?.data;
-  }
-  throw lastErr;
+const gid = (type: string, id: number | string) => `gid://shopify/${type}/${id}`;
+const numId = (g: string): number => Number(String(g).split('/').pop());
+
+function throwUserErrors(what: string, payload: any): void {
+  const errs = payload?.userErrors ?? [];
+  if (errs.length) throw new Error(`${what}: ${errs.map((e: any) => `${(e.field || []).join('.')} ${e.message}`.trim()).join('; ')}`);
 }
 
-export async function findVariantBySku(sku: string): Promise<any> {
+// ── Produtos ──────────────────────────────────────────────────────────────────
+
+export async function findVariantBySku(sku: string): Promise<{ id: number; sku: string; product_id: number; inventory_item_id: number } | null> {
   const data = await graphql(
-    `query findBySku($q: String!) {
-      productVariants(first: 1, query: $q) {
-        edges {
-          node {
-            id
-            sku
-            product { id }
-            inventoryItem { id }
-          }
-        }
+    `query($q: String!) { productVariants(first: 5, query: $q) { nodes { id sku product { id } inventoryItem { id } } } }`,
+    { q: `sku:"${sku.replace(/"/g, '\\"')}"` },
+  );
+  const node = (data?.productVariants?.nodes || []).find((n: any) => n.sku === sku);
+  if (!node) return null;
+  return { id: numId(node.id), sku: node.sku, product_id: numId(node.product.id), inventory_item_id: numId(node.inventoryItem.id) };
+}
+
+const PRODUCT_UPDATE = `
+mutation($product: ProductUpdateInput!, $media: [CreateMediaInput!]) {
+  productUpdate(product: $product, media: $media) { product { id } userErrors { field message } }
+}`;
+
+/** productUpdate: campos do produto, metafields, coleções (collectionsToJoin/Leave) e media. */
+export async function productUpdate(productId: number, input: Record<string, unknown>, media?: { originalSource: string }[]): Promise<void> {
+  const data = await graphql(PRODUCT_UPDATE, {
+    product: { id: gid('Product', productId), ...input },
+    media: media?.length ? media.map(m => ({ originalSource: m.originalSource, mediaContentType: 'IMAGE' })) : null,
+  });
+  throwUserErrors(`productUpdate(${productId})`, data?.productUpdate);
+}
+
+/** productVariantsBulkUpdate de uma variante: preço, preço riscado, barcodes, inventoryItem (custo/peso). */
+export async function variantUpdate(productId: number, variantId: number, input: Record<string, unknown>): Promise<void> {
+  const data = await graphql(
+    `mutation($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+      productVariantsBulkUpdate(productId: $productId, variants: $variants) { userErrors { field message } }
+    }`,
+    { productId: gid('Product', productId), variants: [{ id: gid('ProductVariant', variantId), ...input }] },
+  );
+  throwUserErrors(`productVariantsBulkUpdate(${productId})`, data?.productVariantsBulkUpdate);
+}
+
+/**
+ * Publica o produto na Loja online. O token não tem write_publications, por isso usa-se
+ * o REST (published_at) — a única chamada REST que resta. Quando a app tiver o scope,
+ * trocar por publishablePublish.
+ */
+export async function publishProduct(productId: number): Promise<void> {
+  const conn = loadConnectionSettings();
+  const store = conn.shopifyStore || process.env.SHOPIFY_STORE || '';
+  const token = conn.shopifyToken || process.env.SHOPIFY_PASSWORD || '';
+  for (let i = 0; i < 5; i++) {
+    const res = await axios.put(
+      `https://${store}/admin/api/${SHOPIFY_API_VERSION}/products/${productId}.json`,
+      { product: { id: productId, published_at: new Date().toISOString() } },
+      { headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' }, timeout: 20_000, validateStatus: () => true },
+    ).catch(e => ({ status: 0, data: e?.message, headers: {} as any }));
+    if (res.status >= 200 && res.status < 300) return;
+    if (res.status === 429 || res.status === 0 || res.status >= 500) {
+      const ra = Number((res.headers as any)?.['retry-after'] || 2);
+      await sleep((isNaN(ra) ? 2 : ra) * 1000 * (i + 1));
+      continue;
+    }
+    throw new Error(`publishProduct(${productId}) falhou (${res.status}): ${JSON.stringify(res.data).slice(0, 300)}`);
+  }
+  throw new Error(`publishProduct(${productId}) falhou após 5 tentativas`);
+}
+
+export interface CreateProductInput {
+  title: string; descriptionHtml: string; vendor: string; productType: string; handle: string;
+  status: 'ACTIVE' | 'DRAFT'; sku: string; price: string; compareAtPrice?: string | null; barcode?: string | null;
+  cost?: string; weightGrams?: number; metafields?: { namespace: string; key: string; value: string }[];
+  collectionIds?: string[];
+}
+
+/** Cria um produto de uma variante com productSet. Devolve os IDs numéricos. */
+export async function createProduct(p: CreateProductInput): Promise<{ productId: number; variantId: number; inventoryItemId: number }> {
+  const inventoryItem: Record<string, unknown> = { sku: p.sku, tracked: false };
+  if (p.cost) inventoryItem.cost = p.cost;
+  if (p.weightGrams !== undefined) inventoryItem.measurement = { weight: { value: p.weightGrams, unit: 'GRAMS' } };
+  const data = await graphql(
+    `mutation($input: ProductSetInput!) {
+      productSet(input: $input, synchronous: true) {
+        product { id variants(first: 1) { nodes { id inventoryItem { id } } } }
+        userErrors { field message }
       }
     }`,
-    { q: `sku:${sku}` }
+    { input: {
+      title: p.title, descriptionHtml: p.descriptionHtml, vendor: p.vendor, productType: p.productType,
+      handle: p.handle, status: p.status,
+      metafields: (p.metafields || []).map(m => ({ ...m, type: 'single_line_text_field' })),
+      collections: (p.collectionIds || []).filter(id => /^\d+$/.test(id)).map(id => gid('Collection', id)),
+      productOptions: [{ name: 'Title', values: [{ name: 'Default Title' }] }],
+      variants: [{
+        optionValues: [{ optionName: 'Title', name: 'Default Title' }],
+        price: p.price, compareAtPrice: p.compareAtPrice ?? null,
+        barcodes: p.barcode ? [{ value: p.barcode }] : [],
+        inventoryItem,
+      }],
+    } },
   );
-  const node = data?.productVariants?.edges?.[0]?.node;
-  if (!node || node.sku !== sku) return null;
-  // normalizar para o mesmo formato que o código REST esperava
-  const variantNumId  = parseInt(node.id.split('/').pop(), 10);
-  const productNumId  = parseInt(node.product.id.split('/').pop(), 10);
-  const invItemNumId  = parseInt(node.inventoryItem.id.split('/').pop(), 10);
-  return { id: variantNumId, sku: node.sku, product_id: productNumId, inventory_item_id: invItemNumId };
+  throwUserErrors('productSet', data?.productSet);
+  const prod = data.productSet.product;
+  const v = prod.variants.nodes[0];
+  return { productId: numId(prod.id), variantId: numId(v.id), inventoryItemId: numId(v.inventoryItem.id) };
 }
 
-export async function createProduct(product: Record<string, unknown>): Promise<any> {
-  const { rest } = makeClients();
-  const res = await _requestWithRetry(() => rest.post('products.json', { product }), 'createProduct');
-  return (res as any).data.product;
-}
-
-export async function updateProduct(productId: number, payload: Record<string, unknown>): Promise<any> {
-  const { rest } = makeClients();
-  const res = await _requestWithRetry(
-    () => rest.put(`products/${productId}.json`, { product: { id: productId, ...payload } }),
-    `updateProduct(${productId})`
+export async function findProductByHandle(handle: string): Promise<{ id: number; variants: { id: number; inventory_item_id: number }[] } | null> {
+  const data = await graphql(
+    `query($h: String!) { productByIdentifier(identifier: { handle: $h }) { id variants(first: 1) { nodes { id inventoryItem { id } } } } }`,
+    { h: handle },
   );
-  return (res as any).data.product;
+  const p = data?.productByIdentifier;
+  if (!p) return null;
+  return { id: numId(p.id), variants: p.variants.nodes.map((v: any) => ({ id: numId(v.id), inventory_item_id: numId(v.inventoryItem.id) })) };
 }
-
-export async function updateVariant(variantId: number, payload: Record<string, unknown>): Promise<any> {
-  const { rest } = makeClients();
-  const res = await _requestWithRetry(
-    () => rest.put(`variants/${variantId}.json`, { variant: { id: variantId, ...payload } }),
-    `updateVariant(${variantId})`
-  );
-  return (res as any).data.variant;
-}
-
 
 // ── Metafields ────────────────────────────────────────────────────────────────
 
@@ -171,128 +160,109 @@ export interface MetafieldInput {
   value: string;
 }
 
-/**
- * Upsert de metafields num produto via GraphQL productUpdate.
- * Cria ou actualiza (por namespace+key) sem necessitar do ID do metafield.
- */
-export async function updateProductMetafields(
-  productId: number,
-  metafields: MetafieldInput[]
-): Promise<void> {
+/** Upsert de metafields (por namespace+key) via productUpdate. */
+export async function updateProductMetafields(productId: number, metafields: MetafieldInput[]): Promise<void> {
   if (!metafields.length) return;
-  const gid = `gid://shopify/Product/${productId}`;
-  const data = await graphql(
-    `mutation productMetafieldUpsert($input: ProductInput!) {
-      productUpdate(input: $input) {
-        product { id }
-        userErrors { field message }
-      }
-    }`,
-    {
-      input: {
-        id: gid,
-        metafields: metafields.map(m => ({
-          namespace: m.namespace,
-          key: m.key,
-          value: m.value,
-          type: 'single_line_text_field',
-        })),
-      },
-    }
-  );
-  const errors = data?.productUpdate?.userErrors;
-  if (errors?.length) throw new Error(`updateProductMetafields(${productId}): ${errors.map((e: any) => e.message).join('; ')}`);
+  await productUpdate(productId, {
+    metafields: metafields.map(m => ({ ...m, type: 'single_line_text_field' })),
+  });
 }
 
-export async function setInventoryCost(inventoryItemId: number, cost: string): Promise<void> {
-  const gid = `gid://shopify/InventoryItem/${inventoryItemId}`;
-  const data = await graphql(
-    `mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
-      inventoryItemUpdate(id: $id, input: $input) {
-        inventoryItem { id }
-        userErrors { field message }
-      }
-    }`,
-    { id: gid, input: { cost } }
-  );
-  const errors = data?.inventoryItemUpdate?.userErrors;
-  if (errors?.length) throw new Error(`inventoryItemUpdate: ${errors[0].message}`);
-}
-
-const _collectionCache = new Map<string, number>();
+// ── Coleções ──────────────────────────────────────────────────────────────────
 
 export const toHandle = (str: string) => String(str)
   .toLowerCase()
-  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, '-')
   .replace(/(^-|-$)/g, '')
   .slice(0, 255);
 
-export async function findOrCreateCollection(title: string, handle: string): Promise<number> {
-  if (_collectionCache.has(handle)) return _collectionCache.get(handle)!;
-
-  const { rest } = makeClients();
-  const searchRes = await _requestWithRetry(
-    () => rest.get('custom_collections.json', { params: { handle, limit: 1 } }),
-    `findCollection(${handle})`
+export async function findCollectionId(title: string): Promise<number | null> {
+  const data = await graphql(
+    `query($h: String!) { collectionByIdentifier(identifier: { handle: $h }) { id } }`,
+    { h: toHandle(title) },
   );
-  const existing = (searchRes as any).data?.custom_collections?.[0];
-  if (existing) { _collectionCache.set(handle, existing.id); return existing.id; }
-
-  const createRes = await _requestWithRetry(
-    () => rest.post('custom_collections.json', { custom_collection: { title, handle } }),
-    `createCollection(${handle})`
-  );
-  const id: number = (createRes as any).data.custom_collection.id;
-  _collectionCache.set(handle, id);
-  return id;
+  const id = data?.collectionByIdentifier?.id;
+  return id ? numId(id) : null;
 }
+
+export async function addProductToCollection(productId: number, collectionId: number): Promise<void> {
+  await productUpdate(productId, { collectionsToJoin: [gid('Collection', collectionId)] });
+}
+
+export async function removeProductFromCollection(productId: number, collectionId: number): Promise<void> {
+  await productUpdate(productId, { collectionsToLeave: [gid('Collection', collectionId)] });
+}
+
+export async function fetchProductsInCollection(collectionId: number): Promise<{ id: number; sku: string }[]> {
+  const results: { id: number; sku: string }[] = [];
+  let cursor: string | null = null;
+  do {
+    const data = await graphql(`
+      query($id: ID!, $cursor: String) {
+        collection(id: $id) {
+          products(first: 250, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes { id variants(first: 1) { nodes { sku } } }
+          }
+        }
+      }
+    `, { id: gid('Collection', collectionId), cursor });
+    for (const p of (data?.collection?.products?.nodes || [])) {
+      results.push({ id: numId(p.id), sku: p.variants?.nodes?.[0]?.sku || '' });
+    }
+    cursor = data?.collection?.products?.pageInfo?.hasNextPage ? data.collection.products.pageInfo.endCursor : null;
+  } while (cursor);
+  return results;
+}
+
+// ── Imagens (media) ───────────────────────────────────────────────────────────
 
 export interface ShopifyImage { id: number; src: string; position?: number }
 
-/** Lê as imagens atualmente publicadas num produto Shopify. */
+/** Imagens (MediaImage) de um produto, por ordem. */
 export async function getProductImages(productId: number): Promise<ShopifyImage[]> {
-  const { rest } = makeClients();
-  const res = await _requestWithRetry(
-    () => rest.get(`products/${productId}/images.json`),
-    `getProductImages(${productId})`
+  const data = await graphql(
+    `query($id: ID!) { product(id: $id) { media(first: 100) { nodes { id mediaContentType ... on MediaImage { image { url } originalSource { url } } } } } }`,
+    { id: gid('Product', productId) },
   );
-  return ((res as any).data?.images || []) as ShopifyImage[];
+  return (data?.product?.media?.nodes || [])
+    .filter((m: any) => m.mediaContentType === 'IMAGE')
+    .map((m: any, i: number) => ({ id: numId(m.id), src: m.originalSource?.url || m.image?.url || '', position: i + 1 }));
 }
 
-/** Cria uma imagem num produto (REST). Devolve a imagem criada ou null em 422. */
-export async function addProductImage(productId: number, src: string, position?: number): Promise<ShopifyImage | null> {
-  const { rest } = makeClients();
-  const payload: Record<string, unknown> = { src };
-  if (position != null) payload.position = position;
-  const res = await _requestWithRetry(
-    () => rest.post(`products/${productId}/images.json`, { image: payload }),
-    `addProductImage(${productId})`
-  );
-  const data = (res as any).data;
-  if (!data?.image) return null;
-  return data.image as ShopifyImage;
+/** Acrescenta imagens a um produto (a Shopify descarrega-as de forma assíncrona). */
+export async function addProductImages(productId: number, urls: string[]): Promise<number> {
+  if (!urls.length) return 0;
+  await productUpdate(productId, {}, urls.map(u => ({ originalSource: u })));
+  return urls.length;
 }
 
-/** Apaga uma imagem específica de um produto. */
+/** Compatibilidade: acrescenta uma imagem. */
+export async function addProductImage(productId: number, src: string, _position?: number): Promise<ShopifyImage | null> {
+  await addProductImages(productId, [src]);
+  return { id: 0, src };
+}
+
+/** Retira uma imagem (MediaImage) do produto. */
 export async function deleteProductImage(productId: number, imageId: number): Promise<void> {
-  const { rest } = makeClients();
-  await _requestWithRetry(
-    () => rest.delete(`products/${productId}/images/${imageId}.json`),
-    `deleteProductImage(${productId},${imageId})`
+  const data = await graphql(
+    `mutation($files: [FileUpdateInput!]!) { fileUpdate(files: $files) { userErrors { field message } } }`,
+    { files: [{ id: gid('MediaImage', imageId), referencesToRemove: [gid('Product', productId)] }] },
   );
+  throwUserErrors(`fileUpdate(${imageId})`, data?.fileUpdate);
 }
 
 /**
- * Chave de comparação de imagens pelo nome de ficheiro.
- * O Shopify reescreve o host para o CDN dele mas preserva o filename original,
- * por isso comparar por URL completo nunca bate certo após o upload. O filename é estável.
+ * Chave de comparação de imagens pelo nome de ficheiro. A Shopify passa a imagem para o
+ * CDN dela e acrescenta "_<uuid>" ao nome ("x_product_image_0_a6df69d6-….jpg"): retira-se
+ * esse sufixo para comparar com o URL original.
  */
 export function imageKeyFromUrl(url: string): string {
   try {
     const clean = String(url).split('?')[0].split('#')[0];
-    const base = clean.substring(clean.lastIndexOf('/') + 1);
-    return decodeURIComponent(base).toLowerCase();
+    const base = decodeURIComponent(clean.substring(clean.lastIndexOf('/') + 1)).toLowerCase();
+    return base.replace(/_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\.[a-z0-9]+$)/, '');
   } catch {
     return String(url).toLowerCase();
   }
@@ -310,9 +280,8 @@ export function dedupeImageUrls(urls: string[]): string[] {
 }
 
 /**
- * Reconcilia as imagens de um produto de forma idempotente: lê as imagens reais
- * do Shopify e adiciona apenas as que faltam (comparando por filename). Não envia
- * imagens já presentes, evitando duplicação independentemente do estado dos flags.
+ * Reconcilia as imagens de forma idempotente: lê as imagens do produto e acrescenta só as
+ * que faltam (comparadas por nome de ficheiro), numa só chamada.
  */
 export async function reconcileProductImages(
   productId: number,
@@ -322,27 +291,12 @@ export async function reconcileProductImages(
   const current = await getProductImages(productId);
   const currentKeys = new Set(current.map(i => imageKeyFromUrl(i.src || '')));
   const missing = desired.filter(u => !currentKeys.has(imageKeyFromUrl(u)));
-
-  let added = 0;
-  for (let i = 0; i < missing.length; i++) {
-    const img = await addProductImage(productId, missing[i], current.length + i + 1);
-    if (img) added++;
-  }
-  return {
-    added,
-    missing: missing.length,
-    total: current.length + added,
-    complete: added === missing.length,
-  };
+  const added = missing.length ? await addProductImages(productId, missing) : 0;
+  return { added, missing: missing.length, total: current.length + added, complete: added === missing.length };
 }
 
-/**
- * Remove imagens duplicadas (mesmo filename) de um produto, mantendo a primeira
- * ocorrência por ordem de posição. Devolve quantas manteve e quantas apagou.
- */
-export async function dedupeProductImages(
-  productId: number,
-): Promise<{ kept: number; removed: number; removedIds: number[] }> {
+/** Remove imagens duplicadas (mesmo filename), mantendo a primeira. */
+export async function dedupeProductImages(productId: number): Promise<{ kept: number; removed: number; removedIds: number[] }> {
   const current = await getProductImages(productId);
   const seen = new Set<string>();
   const removedIds: number[] = [];
@@ -356,81 +310,6 @@ export async function dedupeProductImages(
     }
   }
   return { kept: seen.size, removed: removedIds.length, removedIds };
-}
-
-export async function findProductByHandle(handle: string): Promise<any> {
-  const { rest } = makeClients();
-  const res = await _requestWithRetry(
-    () => rest.get('products.json', { params: { handle, limit: 1, fields: 'id,handle,variants' } }),
-    `findProductByHandle(${handle})`
-  );
-  return (res as any).data?.products?.[0] || null;
-}
-
-export async function findCollectionId(title: string): Promise<number | null> {
-  const handle = toHandle(title);
-  const { rest } = makeClients();
-  const res = await _requestWithRetry(
-    () => rest.get('custom_collections.json', { params: { handle, limit: 1 } }),
-    `findCollection(${handle})`
-  );
-  return (res as any).data?.custom_collections?.[0]?.id || null;
-}
-
-export async function fetchProductsInCollection(collectionId: number): Promise<{ id: number; sku: string }[]> {
-  const gid = `gid://shopify/Collection/${collectionId}`;
-  const results: { id: number; sku: string }[] = [];
-  let cursor: string | null = null;
-  do {
-    const data = await graphql(`
-      query($id: ID!, $cursor: String) {
-        collection(id: $id) {
-          products(first: 250, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes { id variants(first: 1) { nodes { sku } } }
-          }
-        }
-      }
-    `, { id: gid, cursor });
-    for (const p of (data?.collection?.products?.nodes || [])) {
-      results.push({ id: Number(p.id.split('/').pop()), sku: p.variants?.nodes?.[0]?.sku || '' });
-    }
-    cursor = data?.collection?.products?.pageInfo?.hasNextPage
-      ? data.collection.products.pageInfo.endCursor : null;
-  } while (cursor);
-  return results;
-}
-
-export async function getCollectId(productId: number, collectionId: number): Promise<number | null> {
-  const { rest } = makeClients();
-  const res = await _requestWithRetry(
-    () => rest.get('collects.json', { params: { product_id: productId, collection_id: collectionId, limit: 1 } }),
-    `getCollect(${productId},${collectionId})`
-  );
-  return (res as any).data?.collects?.[0]?.id ?? null;
-}
-
-export async function deleteCollect(collectId: number): Promise<void> {
-  const { rest } = makeClients();
-  await _requestWithRetry(
-    () => rest.delete(`collects/${collectId}.json`),
-    `deleteCollect(${collectId})`
-  );
-}
-
-export async function addProductToCollection(productId: number, collectionId: number): Promise<void> {
-  const { rest } = makeClients();
-  for (let i = 0; i < 3; i++) {
-    const res = await rest.post('collects.json', { collect: { product_id: productId, collection_id: collectionId } });
-    if (res.status >= 200 && res.status < 300) return;
-    if (res.status === 422) return; // já está na coleção
-    if (res.status === 429) {
-      const ra = Number(res.headers?.['retry-after'] || 2);
-      await sleep((isNaN(ra) ? 2 : ra) * 1000);
-      continue;
-    }
-    throw new Error(`addToCollection(${productId}) falhou (${res.status})`);
-  }
 }
 
 export async function fetchAllCollections(): Promise<Map<string, string>> {
@@ -601,7 +480,6 @@ export async function syncMenuStructure(
   const menu = await _fetchMenuByHandle('menu-principal');
   if (!menu) throw new Error("Menu 'menu-principal' não encontrado no Shopify");
 
-  const { rest } = makeClients();
   let created = 0;
   let renamed = 0;
   const deleted = 0;
@@ -629,14 +507,12 @@ export async function syncMenuStructure(
       const idArr = Array.from(allShopifyIds);
       for (let i = 0; i < idArr.length; i += 200) idChunks.push(idArr.slice(i, i + 200));
       for (const chunk of idChunks) {
-        const collRes = await _requestWithRetry(
-          () => rest.get('custom_collections.json', {
-            params: { ids: chunk.join(','), limit: 250, fields: 'id,title' }
-          }),
-          'fetchCollectionTitles'
+        const data = await graphql(
+          `query($ids: [ID!]!) { nodes(ids: $ids) { ... on Collection { id title } } }`,
+          { ids: chunk.map(id => gid('Collection', id)) },
         );
-        for (const c of ((collRes as any).data?.custom_collections || [])) {
-          collectionTitles.set(String(c.id), c.title);
+        for (const c of (data?.nodes || [])) {
+          if (c?.id) collectionTitles.set(String(numId(c.id)), c.title);
         }
       }
     } catch { /* non-fatal */ }
@@ -670,14 +546,12 @@ export async function syncMenuStructure(
         if (currentTitle.trim() !== node.title.trim()) {
           try {
             const newHandle = parentHandle ? `${parentHandle}--${toHandle(node.title)}` : toHandle(node.title);
-            await _requestWithRetry(
-              () => rest.put(`custom_collections/${node.shopifyId}.json`, {
-                custom_collection: { id: Number(node.shopifyId), title: node.title, handle: newHandle }
-              }),
-              `renameCollection(${node.shopifyId})`
+            const r = await graphql(
+              `mutation($c: CollectionUpdateInput!) { collectionUpdate(collection: $c) { collection { id } userErrors { field message } } }`,
+              { c: { id: gid('Collection', node.shopifyId!), title: node.title, handle: newHandle } },
             );
+            throwUserErrors('collectionUpdate', r?.collectionUpdate);
             renamed++;
-            _collectionCache.delete(toHandle(currentTitle));
             allCollections.set(newHandle, `gid://shopify/Collection/${node.shopifyId}`);
           } catch (e: any) {
             errors.push(`Erro ao renomear '${currentTitle}' → '${node.title}': ${e.message}`);
@@ -696,18 +570,18 @@ export async function syncMenuStructure(
       return existingGid;
     }
 
-    // Truly new collection — create via REST
+    // Coleção nova
     try {
-      const createRes = await _requestWithRetry(
-        () => rest.post('custom_collections.json', { custom_collection: { title: node.title, handle } }),
-        `createCollection(${handle})`
+      const r = await graphql(
+        `mutation($c: CollectionInput!) { collectionCreate(input: $c) { collection { id } userErrors { field message } } }`,
+        { c: { title: node.title, handle } },
       );
+      throwUserErrors('collectionCreate', r?.collectionCreate);
       created++;
-      const newId = String((createRes as any).data.custom_collection.id);
+      const newId = String(numId(r.collectionCreate.collection.id));
       const newGid = `gid://shopify/Collection/${newId}`;
       node.shopifyId = newId;
       allCollections.set(handle, newGid);
-      _collectionCache.set(handle, Number(newId));
       return newGid;
     } catch (e: any) {
       errors.push(`Coleção '${node.title}': ${e.message}`);

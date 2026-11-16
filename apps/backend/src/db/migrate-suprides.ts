@@ -58,6 +58,12 @@ export function ensureSupridesTable(): void {
   } catch {
     // Coluna já existe — ignorar
   }
+  // Hash do conteúdo enviado da última vez (sync por diferenças).
+  try {
+    db.exec(`ALTER TABLE suprides_products ADD COLUMN shopify_content_hash TEXT`);
+  } catch {
+    // Coluna já existe — ignorar
+  }
   // Índice sempre criado depois de garantir que a coluna existe
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sp_node ON suprides_products (shopify_node_id)`);
 

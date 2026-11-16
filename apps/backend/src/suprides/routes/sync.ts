@@ -2,12 +2,11 @@ import { Router } from 'express';
 import { getAllProducts, buildFamiliasFromProducts } from '../services/products-cache';
 import { parseStockStatus, formatStockStatusLabel, type StockStatus } from '../api/suprides-api';
 import {
-  findVariantBySku, createProduct, updateProduct, updateVariant,
-  addProductToCollection, findCollectionId, findProductByHandle,
-  fetchProductsInCollection, getCollectId, deleteCollect, setInventoryCost,
-  resetSyncAbort, abortSync, reconcileProductImages,
-  toMetafieldKey, updateProductMetafields, type MetafieldInput,
+  createProduct, productUpdate, variantUpdate, publishProduct,
+  findCollectionId, removeProductFromCollection, fetchProductsInCollection,
+  resetSyncAbort, abortSync, reconcileProductImages, toMetafieldKey,
 } from '../api/shopify-api';
+import { planProductWrite, contentHash, type DesiredProduct } from '../services/shopify-diff';
 import { normalizeMoney, applyMargin, applyRounding, slug } from '../services/price-calc';
 import { loadSupridesTaxonomy, normTaxonomyValue } from '../services/taxonomy';
 import {
@@ -395,6 +394,8 @@ export interface SyncPlanItem {
   stockStatus?: string;
   marginRule?: string | null;
   collectionIds?: string[];
+  /** Campos que seriam enviados (vazio = nada muda na loja). */
+  changes?: string[];
 }
 
 export async function runFullShopifySync(opts: {
@@ -595,6 +596,27 @@ export async function runFullShopifySync(opts: {
     let created = 0, updated = 0;
     const skippedNew: string[] = [];     // não existem na Shopify e createNewProducts está desligado
     let noMarginRule = 0;                // preço calculado sem regra de margem (custo + IVA)
+    let unchanged = 0;                   // produtos existentes em que nada muda (nada enviado)
+
+    // Hash do conteúdo (título/descrição/marca/tipo/filtros) enviado da última vez.
+    const skuContentHash = new Map<string, string>(
+      (db.prepare('SELECT sku, shopify_content_hash h FROM suprides_products WHERE shopify_content_hash IS NOT NULL').all() as { sku: string; h: string }[])
+        .map(r => [r.sku, r.h]),
+    );
+    const saveContentHash = db.prepare('UPDATE suprides_products SET shopify_content_hash = ? WHERE sku = ?');
+
+    // Imagens: acrescenta só as que faltam; um erro aqui não falha o produto.
+    const syncImages = async (sku: string, productId: number, urls: string[]) => {
+      try {
+        const { complete } = await reconcileProductImages(productId, urls);
+        if (complete) {
+          db.prepare('UPDATE suprides_products SET images_synced = 1 WHERE sku = ?').run(sku);
+          skuImagesSynced.set(sku, true);
+        }
+      } catch (imgErr: any) {
+        console.warn(`[Suprides] imagens SKU ${sku}:`, imgErr?.message);
+      }
+    };
     const belowCostVat: { sku: string; price: string; cost: string }[] = []; // preço final < custo + IVA
     const errors: { sku: string; error: unknown }[] = [];
     // Produtos sem preço de custo: nunca publicar com preço inventado.
@@ -633,17 +655,31 @@ export async function runFullShopifySync(opts: {
       const fam  = (p.family       || '').trim();
       const sub  = (p.sub_family   || '').trim();
 
+      // Rascunho sem mais nada (sem stock fora do mapeamento, ou sem custo): só estado (+ stock).
+      const sendDraftOnly = async (productId: number, stockLabel?: string): Promise<string[]> => {
+        const cur = shopById.get(productId);
+        const input: Record<string, unknown> = {};
+        const changes: string[] = [];
+        if (!cur || cur.status !== 'DRAFT') { input.status = 'DRAFT'; changes.push('status'); }
+        if (stockLabel && (cur?.stockStatus ?? '') !== stockLabel) {
+          input.metafields = [{ namespace: 'custom', key: 'stock_status', value: stockLabel, type: 'single_line_text_field' }];
+          changes.push('stock_status');
+        }
+        if (!dryRun && changes.length) {
+          throwIfCancelled();
+          await productUpdate(productId, input);
+        }
+        return changes;
+      };
+
       if (draftOnlySkus.has(p.sku)) {
         const known = skuShopifyCache.get(p.sku)!;
+        const changes = await sendDraftOnly(known.productId, formatStockStatusLabel('sem_stock'));
+        if (!changes.length) unchanged++;
         if (dryRun) {
-          plan.push({ sku: p.sku, action: 'draft-unmapped', shopifyProductId: known.productId, status: 'draft', stockStatus: 'sem_stock' });
+          plan.push({ sku: p.sku, action: 'draft-unmapped', shopifyProductId: known.productId, status: 'draft', stockStatus: 'sem_stock', changes });
           return;
         }
-        throwIfCancelled();
-        await updateProduct(known.productId, { status: 'draft', published_at: null });
-        await updateProductMetafields(known.productId, [
-          { namespace: 'custom', key: 'stock_status', value: formatStockStatusLabel('sem_stock') },
-        ]).catch((e: any) => console.warn(`[Suprides] metafields SKU ${p.sku}:`, e?.message));
         draftedUnmapped.push(p.sku);
         return;
       }
@@ -654,17 +690,13 @@ export async function runFullShopifySync(opts: {
         : 0;
       if (cost <= 0) {
         const known = skuShopifyCache.get(p.sku);
+        const changes = known ? await sendDraftOnly(known.productId) : [];
         if (dryRun) {
-          plan.push({ sku: p.sku, action: known ? 'draft-no-cost' : 'skip-no-cost', shopifyProductId: known?.productId, status: known ? 'draft' : undefined });
+          plan.push({ sku: p.sku, action: known ? 'draft-no-cost' : 'skip-no-cost', shopifyProductId: known?.productId, status: known ? 'draft' : undefined, changes });
           return;
         }
-        if (known) {
-          throwIfCancelled();
-          await updateProduct(known.productId, { status: 'draft', published_at: null });
-          noCostHidden.push(p.sku);
-        } else {
-          noCostSkipped.push(p.sku);
-        }
+        if (known) noCostHidden.push(p.sku);
+        else noCostSkipped.push(p.sku);
         return;
       }
       const costPrice = cost.toFixed(2);
@@ -692,29 +724,14 @@ export async function runFullShopifySync(opts: {
       // Disponível / brevemente / sob encomenda ficam visíveis; sem stock fica escondido.
       const status = stockStatus === 'sem_stock' ? 'draft' : 'active';
 
-      const aiTagEntries = skuTagMap.get(p.sku) ?? [];
-      const metafields: MetafieldInput[] = [
-        { namespace: 'custom', key: 'stock_status', value: formatStockStatusLabel(stockStatus as StockStatus) },
-        ...aiTagEntries.map(({ group, value }) => ({
-          namespace: 'filtros',
-          key: toMetafieldKey(group),
-          value,
-        })),
-      ];
+      const filtros = (skuTagMap.get(p.sku) ?? []).map(({ group, value }) => ({
+        namespace: 'filtros', key: toMetafieldKey(group), value,
+      }));
 
       const imageUrls: string[] = (Array.isArray(p.images) ? p.images : [])
         .map((src: unknown) => (typeof src === 'string' ? src.trim() : ''))
         .filter((src: string) => /^https?:\/\//i.test(src));
-      const body_html = _buildBodyHtml(p, line, fam, sub);
       const weightGrams = p.weight ? Math.round(parseFloat(String(p.weight)) * 1000) : undefined;
-
-      // published_at garante que produtos activos ficam visíveis nos canais de venda
-      const published_at = status === 'active' ? new Date().toISOString() : null;
-      const basePayload = {
-        title, vendor: p.brand ?? 'Suprides',
-        product_type: shopCurrent && !line ? shopCurrent.productType : line, // linha vazia não apaga o tipo da loja
-        body_html, tags: '', status, published_at,
-      };
 
       // O índice da loja (lido no início) diz se o produto existe; sem ele não se cria nada.
       const known = skuShopifyCache.get(p.sku);
@@ -737,160 +754,89 @@ export async function runFullShopifySync(opts: {
         for (const cid of collectionIds) activeCollectionIdSet.add(cid);
       }
 
+      // Coleções por ID numérico (os nós antigos podem vir por título).
+      const numericCollectionIds = async (): Promise<string[]> => {
+        if (shopCurrent) return [];               // fora do mapeamento: não se mexe nas coleções
+        const out: string[] = [];
+        for (const cid of collectionIds) {
+          if (/^\d+$/.test(cid)) { out.push(cid); continue; }
+          if (dryRun) continue;
+          const n = await resolveNumericCollId(cid);
+          if (n) out.push(String(n));
+        }
+        return out;
+      };
+
+      const desired: DesiredProduct = {
+        title,
+        descriptionHtml: _buildBodyHtml(p, line, fam, sub),
+        vendor: p.brand ?? 'Suprides',
+        productType: shopCurrent && !line ? shopCurrent.productType : line, // linha vazia não apaga o tipo da loja
+        status: status === 'active' ? 'ACTIVE' : 'DRAFT',
+        stockStatusLabel: formatStockStatusLabel(stockStatus as StockStatus),
+        filtros,
+        collectionIds: await numericCollectionIds(),
+        price,
+        compareAtPrice: pvpr ?? null,
+        barcode: p.ean || null,
+        cost: costPrice,
+        weightGrams,
+      };
+
+      if (!known) {
+        // Criar (só com createNewProducts ligado).
+        if (dryRun) {
+          plan.push({
+            sku: p.sku, action: 'create', status, price, compareAtPrice: pvpr ?? null, cost: costPrice, stockStatus,
+            marginRule: rule ? `${rule.mode}:${rule.marginValue}` : null, collectionIds,
+          });
+          return;
+        }
+        throwIfCancelled();
+        const createdIds = await createProduct({
+          title: desired.title, descriptionHtml: desired.descriptionHtml, vendor: desired.vendor,
+          productType: desired.productType, handle: slug(`${title}-${p.sku}`), status: desired.status,
+          sku: p.sku, price, compareAtPrice: desired.compareAtPrice, barcode: desired.barcode, cost: costPrice,
+          weightGrams, collectionIds: desired.collectionIds,
+          metafields: [{ namespace: 'custom', key: 'stock_status', value: desired.stockStatusLabel }, ...filtros],
+        });
+        if (desired.status === 'ACTIVE') await publishProduct(createdIds.productId);
+        db.prepare(`UPDATE suprides_products
+                    SET shopify_product_id = ?, shopify_variant_id = ?, shopify_inventory_item_id = ?, shopify_content_hash = ?
+                    WHERE sku = ?`)
+          .run(createdIds.productId, createdIds.variantId, createdIds.inventoryItemId, contentHash(desired), p.sku);
+        skuShopifyCache.set(p.sku, { productId: createdIds.productId, variantId: createdIds.variantId, inventoryItemId: createdIds.inventoryItemId });
+        markDone(p, 'created');
+        if (!opts.skipImages && imageUrls.length) await syncImages(p.sku, createdIds.productId, imageUrls);
+        return;
+      }
+
+      const cur = shopById.get(known.productId)!;
+      const w = planProductWrite(desired, cur, skuContentHash.get(p.sku) ?? null);
+      if (!w.changes.length) unchanged++;
+
       if (dryRun) {
         plan.push({
-          sku: p.sku,
-          action: known ? 'update' : 'create',
-          shopifyProductId: known?.productId,
+          sku: p.sku, action: 'update', shopifyProductId: known.productId,
           status, price, compareAtPrice: pvpr ?? null, cost: costPrice, stockStatus,
           marginRule: rule ? `${rule.mode}:${rule.marginValue}` : null,
-          collectionIds,
+          collectionIds, changes: w.changes,
         });
         return;
       }
 
       throwIfCancelled();
-
-      // Usar cache local antes de chamar API (evita findVariantBySku na maioria dos casos)
-      const cached = skuShopifyCache.get(p.sku);
-      let shopifyProductId: number | undefined;
-      let shopifyVariantId: number | undefined;
-      let shopifyInventoryItemId: number | undefined;
-
-      if (cached) {
-        shopifyProductId    = cached.productId;
-        shopifyVariantId    = cached.variantId;
-        shopifyInventoryItemId = cached.inventoryItemId;
-        throwIfCancelled();
-        await updateProduct(shopifyProductId, basePayload);
-        throwIfCancelled();
-        await updateVariant(shopifyVariantId, {
-          price, compare_at_price: pvpr ?? null, barcode: p.ean,
-          ...(weightGrams !== undefined ? { weight: weightGrams, weight_unit: 'g' } : {})
-        });
-        // Custo igual ao que a loja já tem (cópia lida no início) → não reenviar.
-        const shopCost = shopById.get(shopifyProductId)?.cost;
-        const costUnchanged = shopCost != null && Math.abs(Number(shopCost) - Number(costPrice)) < 0.005;
-        if (shopifyInventoryItemId && costPrice !== null && !costUnchanged) {
-          try { await setInventoryCost(shopifyInventoryItemId, costPrice); } catch (ce: any) { console.warn('[Suprides] setInventoryCost falhou:', ce?.message); }
-        }
-        markDone(p, 'updated');
-      } else {
-        // Produto ainda não conhecido — verificar no Shopify
-        const existingVar = await findVariantBySku(p.sku);
-
-        if (existingVar) {
-          shopifyProductId    = existingVar.product_id;
-          shopifyVariantId    = existingVar.id;
-          shopifyInventoryItemId = existingVar.inventory_item_id;
-          throwIfCancelled();
-          await updateProduct(shopifyProductId!, basePayload);
-          throwIfCancelled();
-          await updateVariant(shopifyVariantId!, {
-            price, compare_at_price: pvpr ?? null, barcode: p.ean,
-            ...(weightGrams !== undefined ? { weight: weightGrams, weight_unit: 'g' } : {})
-          });
-          if (shopifyInventoryItemId && costPrice !== null) {
-            try { await setInventoryCost(shopifyInventoryItemId, costPrice); } catch (ce: any) { console.warn('[Suprides] setInventoryCost falhou:', ce?.message); }
-          }
-          markDone(p, 'updated');
-        } else {
-          const productHandle = slug(`${title}-${p.sku}`);
-          let fallbackProduct: any = null;
-          throwIfCancelled();
-          try {
-            const created_ = await createProduct({
-              ...basePayload, handle: productHandle,
-              variants: [{
-                sku: p.sku, barcode: p.ean, price, compare_at_price: pvpr ?? null,
-                ...(weightGrams !== undefined ? { weight: weightGrams, weight_unit: 'g' } : {})
-              }]
-            });
-            shopifyProductId    = created_.id;
-            shopifyVariantId    = created_.variants?.[0]?.id;
-            shopifyInventoryItemId = created_.variants?.[0]?.inventory_item_id;
-            if (shopifyInventoryItemId && costPrice !== null) {
-              try { await setInventoryCost(shopifyInventoryItemId, costPrice); } catch (ce: any) { console.warn('[Suprides] setInventoryCost falhou:', ce?.message); }
-            }
-            markDone(p, 'created');
-          } catch (createErr: any) {
-            if ((createErr as any).cancelled) throw createErr;
-            // 422 = produto ou handle já existe — tentar encontrar e atualizar
-            if (createErr?.response?.status === 422 || String(createErr?.message).includes('422')) {
-              try {
-                fallbackProduct = await findProductByHandle(productHandle);
-                if (!fallbackProduct) {
-                  const v2 = await findVariantBySku(p.sku);
-                  if (v2) fallbackProduct = { id: v2.product_id, variants: [{ id: v2.id, inventory_item_id: v2.inventory_item_id }] };
-                }
-              } catch { /* fallback silencioso — vai lançar createErr abaixo */ }
-            }
-            if (!fallbackProduct) throw createErr;
-          }
-          if (fallbackProduct) {
-            shopifyProductId = fallbackProduct.id;
-            const existingVariant = fallbackProduct.variants?.[0];
-            shopifyVariantId    = existingVariant?.id;
-            shopifyInventoryItemId = existingVariant?.inventory_item_id;
-            throwIfCancelled();
-            await updateProduct(shopifyProductId!, basePayload);
-            if (existingVariant) {
-              throwIfCancelled();
-              await updateVariant(existingVariant.id, {
-                price, compare_at_price: pvpr ?? null, barcode: p.ean,
-                ...(weightGrams !== undefined ? { weight: weightGrams, weight_unit: 'g' } : {})
-              });
-              if (existingVariant.inventory_item_id && costPrice !== null) {
-                try { await setInventoryCost(existingVariant.inventory_item_id, costPrice); } catch (ce: any) { console.warn('[Suprides] setInventoryCost falhou:', ce?.message); }
-              }
-            }
-            markDone(p, 'updated');
-          }
-        }
+      if (w.product) await productUpdate(known.productId, w.product);
+      if (w.variant) { throwIfCancelled(); await variantUpdate(known.productId, known.variantId, w.variant); }
+      if (w.publish) { throwIfCancelled(); await publishProduct(known.productId); }
+      if (w.product && w.contentHash !== skuContentHash.get(p.sku)) {
+        saveContentHash.run(w.contentHash, p.sku);
+        skuContentHash.set(p.sku, w.contentHash);
       }
+      markDone(p, 'updated');
 
-      throwIfCancelled();
-      if (shopifyProductId) {
-        getSqlite()
-          .prepare(`UPDATE suprides_products
-                    SET shopify_product_id = ?,
-                        shopify_variant_id = ?,
-                        shopify_inventory_item_id = ?
-                    WHERE sku = ?`)
-          .run(shopifyProductId, shopifyVariantId ?? null, shopifyInventoryItemId ?? null, p.sku);
-        // Actualizar cache em memória para próxima iteração se re-usado
-        if (shopifyVariantId && shopifyInventoryItemId) {
-          skuShopifyCache.set(p.sku, { productId: shopifyProductId, variantId: shopifyVariantId, inventoryItemId: shopifyInventoryItemId });
-        }
-
-        // Imagens: reconciliação idempotente. Lê as imagens reais do Shopify e
-        // adiciona só as que faltam (comparadas por filename), nunca reenvia o
-        // conjunto inteiro — elimina a duplicação dos syncs anteriores.
-        if (!opts.skipImages && imageUrls.length > 0 && skuImagesSynced.get(p.sku) !== true) {
-          try {
-            const { complete } = await reconcileProductImages(shopifyProductId, imageUrls);
-            if (complete) {
-              getSqlite().prepare('UPDATE suprides_products SET images_synced = 1 WHERE sku = ?').run(p.sku);
-              skuImagesSynced.set(p.sku, true);
-            }
-          } catch (imgErr: any) {
-            console.warn(`[Suprides] reconcile imagens SKU ${p.sku}:`, imgErr?.message);
-          }
-        }
-
-        // Coleções onde o produto já está (segundo a cópia lida no início) não se reenviam.
-        const alreadyIn = new Set(shopById.get(shopifyProductId)?.collectionIds ?? []);
-        await Promise.all([
-          ...(shopCurrent ? [] : collectionIds.filter(cid => !alreadyIn.has(cid))).map(async cid => {
-            const numId = await resolveNumericCollId(cid);
-            if (numId) await addProductToCollection(shopifyProductId!, numId);
-          }),
-          metafields.length
-            ? updateProductMetafields(shopifyProductId, metafields).catch((e: any) =>
-                console.warn(`[Suprides] metafields SKU ${p.sku}:`, e?.message)
-              )
-            : Promise.resolve(),
-        ]);
+      if (!opts.skipImages && imageUrls.length > 0 && skuImagesSynced.get(p.sku) !== true) {
+        await syncImages(p.sku, known.productId, imageUrls);
       }
     };
 
@@ -946,6 +892,8 @@ export async function runFullShopifySync(opts: {
         summary: {
           update: count('update'), create: count('create'), skipNew: count('skip-new'),
           draftNoCost: count('draft-no-cost'), skipNoCost: count('skip-no-cost'), draftUnmapped: count('draft-unmapped'),
+          unchanged,
+          changesByField: plan.reduce((m, x) => { for (const c of x.changes || []) m[c] = (m[c] || 0) + 1; return m; }, {} as Record<string, number>),
           active: sent.filter(x => x.status === 'active').length,
           draft: sent.filter(x => x.status === 'draft').length,
           activeCollections: activeCollectionIdSet.size,
@@ -1104,8 +1052,8 @@ router.post('/reconcile-removes', async (req, res) => {
     const errors: string[] = [];
     for (const item of toRemove) {
       try {
-        const cid = await getCollectId(item.productId, Number(item.collectionId));
-        if (cid) { await deleteCollect(cid); removed++; }
+        await removeProductFromCollection(item.productId, Number(item.collectionId));
+        removed++;
       } catch (e: any) {
         errors.push(`${item.sku} / ${item.collectionTitle}: ${e?.message}`);
       }
@@ -1126,22 +1074,25 @@ router.post('/sync-familias-cache', async (_req, res) => {
 });
 
 // Sync rápido — só estado de stock. Não toca em títulos, imagens, preços nem coleções.
-// Para cada produto já com shopify_product_id atualiza:
-//   - status do produto (active / draft) consoante o stock_status
-//   - metafield custom.stock_status
-// Lê o stock_status que o sync da cache (API → SQLite) gravou. Produtos ainda não
-// criados no Shopify são ignorados (usar /sync-familias para os criar).
+// Lê a loja e, para cada produto já na Shopify, envia só o que mudou:
+//   - status do produto (ACTIVE / DRAFT) consoante o stock_status (publica se reativar);
+//   - metafield custom.stock_status.
+// Lê o stock_status que a importação (API → SQLite) gravou.
 router.post('/sync-stock', async (_req, res) => {
   if (fullSyncRunning) {
-    res.status(409).json({ error: 'Há um sync completo em curso' });
+    res.status(409).json({ error: 'Há um sync em curso' });
     return;
   }
+  fullSyncRunning = true;
   try {
-    const rows = getSqlite().prepare(
+    const shop = await readAllProducts();
+    const byId = new Map(shop.map(sp => [sp.productId, sp]));
+    const rows = (getSqlite().prepare(
       `SELECT sku, shopify_product_id, stock_status, stock
        FROM suprides_products
        WHERE shopify_product_id IS NOT NULL`
-    ).all() as { sku: string; shopify_product_id: number; stock_status: string | null; stock: number | null }[];
+    ).all() as { sku: string; shopify_product_id: number; stock_status: string | null; stock: number | null }[])
+      .filter(r => byId.has(r.shopify_product_id));
 
     if (rows.length === 0) {
       return res.json({ message: 'Nenhum produto sincronizado ao Shopify', updated: 0, errors: [] });
@@ -1151,15 +1102,18 @@ router.post('/sync-stock', async (_req, res) => {
     const errors: { sku: string; error: unknown }[] = [];
 
     const processOne = async (r: typeof rows[number]) => {
+      const cur = byId.get(r.shopify_product_id)!;
       const stockStatus = r.stock_status || parseStockStatus(r.stock != null ? String(r.stock) : undefined);
-      const status = stockStatus === 'sem_stock' ? 'draft' : 'active';
-      await updateProduct(r.shopify_product_id, {
-        status,
-        published_at: status === 'active' ? new Date().toISOString() : null,
-      });
-      await updateProductMetafields(r.shopify_product_id, [
-        { namespace: 'custom', key: 'stock_status', value: formatStockStatusLabel(stockStatus as StockStatus) },
-      ]);
+      const status = stockStatus === 'sem_stock' ? 'DRAFT' : 'ACTIVE';
+      const label = formatStockStatusLabel(stockStatus as StockStatus);
+      const input: Record<string, unknown> = {};
+      if (cur.status !== status) input.status = status;
+      if ((cur.stockStatus ?? '') !== label) {
+        input.metafields = [{ namespace: 'custom', key: 'stock_status', value: label, type: 'single_line_text_field' }];
+      }
+      if (!Object.keys(input).length) return;
+      await productUpdate(r.shopify_product_id, input);
+      if (status === 'ACTIVE' && !cur.publishedAt) await publishProduct(r.shopify_product_id);
       updated++;
     };
 
@@ -1179,9 +1133,11 @@ router.post('/sync-stock', async (_req, res) => {
       })
     );
 
-    res.json({ message: `Stock sincronizado: ${updated} produtos`, updated, errors });
+    res.json({ message: `Stock sincronizado: ${updated} produtos alterados`, updated, errors });
   } catch (err: any) {
     res.status(500).json({ error: 'Erro ao sincronizar stock', detail: err.message });
+  } finally {
+    fullSyncRunning = false;
   }
 });
 
