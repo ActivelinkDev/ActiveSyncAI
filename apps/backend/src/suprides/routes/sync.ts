@@ -520,16 +520,23 @@ export async function runFullShopifySync(opts: {
 
     // Sincronizar produtos com mapeamento L2/L3 activo, shopify_node_id como fallback,
     // ou já previamente sincronizados ao Shopify (para garantir actualizações).
-    // Produtos já na Shopify, sem stock, fora das linhas mapeadas (ex.: retirados da Suprides sem linha):
-    // só passam a draft — nunca se recalcula o preço sem regra/coleção.
+    // Produtos já na Shopify fora das linhas mapeadas (linha não mapeada ou vazia na Suprides):
+    // - sem stock → só passam a draft;
+    // - com stock → preço/custo/stock atualizados, com a margem das coleções que JÁ têm na loja
+    //   (as coleções não são alteradas).
     const draftOnlySkus = new Set<string>();
+    const shopCollectionSkus = new Set<string>();
+    const shopBySku = new Map<string, SnapshotProduct>();
+    for (const sp of shopProducts) if (sp.sku && !shopBySku.has(sp.sku)) shopBySku.set(sp.sku, sp);
     const filtrados = all.filter(p => {
       if (resume && syncedSkus.has(p.sku)) return false;
       const line = normTaxonomyValue((p.product_line || '').trim());
       if (!eligibleLines.has(line)) {
+        if (!skuShopifyCache.has(p.sku)) return false;
         const semStock = ((p.stock_status as string) || parseStockStatus(p.stock)) === 'sem_stock';
-        if (semStock && skuShopifyCache.has(p.sku)) { draftOnlySkus.add(p.sku); return true; }
-        return false;
+        if (semStock) draftOnlySkus.add(p.sku);
+        else shopCollectionSkus.add(p.sku);
+        return true;
       }
       const fam = normTaxonomyValue((p.family || '').trim());
       const sub = normTaxonomyValue((p.sub_family || '').trim());
@@ -645,8 +652,12 @@ export async function runFullShopifySync(opts: {
         return;
       }
       const costPrice = cost.toFixed(2);
-      let collectionIds = buildDerivedCollectionIds(line, fam, sub, collMap, indexes, hierarchyById);
-      if (!collectionIds.some(id => !!(hierarchyById.get(id)?.l1Id))) {
+      // Fora do mapeamento: coleções atuais da loja (só para a margem; não se acrescentam).
+      const shopCurrent = shopCollectionSkus.has(p.sku) ? shopBySku.get(p.sku) : undefined;
+      let collectionIds = shopCurrent
+        ? [...shopCurrent.collectionIds]
+        : buildDerivedCollectionIds(line, fam, sub, collMap, indexes, hierarchyById);
+      if (!shopCurrent && !collectionIds.some(id => !!(hierarchyById.get(id)?.l1Id))) {
         const nodeId = skuNodeMap.get(p.sku);
         if (nodeId) collectionIds = [nodeId];
       }
@@ -684,7 +695,8 @@ export async function runFullShopifySync(opts: {
       // published_at garante que produtos activos ficam visíveis nos canais de venda
       const published_at = status === 'active' ? new Date().toISOString() : null;
       const basePayload = {
-        title, vendor: p.brand ?? 'Suprides', product_type: line,
+        title, vendor: p.brand ?? 'Suprides',
+        product_type: shopCurrent && !line ? shopCurrent.productType : line, // linha vazia não apaga o tipo da loja
         body_html, tags: '', status, published_at,
       };
 
@@ -848,7 +860,7 @@ export async function runFullShopifySync(opts: {
         }
 
         await Promise.all([
-          ...collectionIds.map(async cid => {
+          ...(shopCurrent ? [] : collectionIds).map(async cid => {
             const numId = await resolveNumericCollId(cid);
             if (numId) await addProductToCollection(shopifyProductId!, numId);
           }),

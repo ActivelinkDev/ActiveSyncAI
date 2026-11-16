@@ -28,7 +28,7 @@ const SHOP: SnapshotProduct[] = [
   shop(1, 'UPD'),
   shop(2, 'NOCOST'),
   shop(3, 'UNMAPPED-SEM-STOCK'),
-  shop(4, 'UNMAPPED-ATIVO'),
+  { ...shop(4, 'UNMAPPED-ATIVO'), collectionIds: ['101'], productType: 'Capas' },
   shop(5, 'BELOW'),
   shop(9, 'OUTRO-FORNECEDOR'),
 ];
@@ -47,7 +47,7 @@ before(() => {
     prod({ sku: 'NOCOST', price: null }),                          // existe, sem custo → draft-no-cost
     prod({ sku: 'NOCOST-NEW', product_line: 'ACESSORIOS', price: null }), // não existe, sem custo → skip-no-cost
     prod({ sku: 'UNMAPPED-SEM-STOCK', product_line: 'LINHA X', stock: 0, stock_status: 'sem_stock' }), // → draft-unmapped
-    prod({ sku: 'UNMAPPED-ATIVO', product_line: 'LINHA X' }),      // fora do sync (fica nas verificações)
+    prod({ sku: 'UNMAPPED-ATIVO', product_line: null, family: null }), // sem linha → preço com a margem das coleções da loja
     prod({ sku: 'BELOW', product_line: 'ACESSORIOS', price: 41.4 }), // sem margem: 41,4 × 1,23 = 50,92 → 50,90 < custo+IVA
   ]);
 });
@@ -76,9 +76,13 @@ test('dry-run: decisão por produto', async () => {
   assert.equal(plan.get('NOCOST')?.status, 'draft');
   assert.equal(plan.get('NOCOST-NEW')?.action, 'skip-no-cost');
   assert.equal(plan.get('UNMAPPED-SEM-STOCK')?.action, 'draft-unmapped');
-  assert.equal(plan.has('UNMAPPED-ATIVO'), false);
+  const ua = plan.get('UNMAPPED-ATIVO')!;
+  assert.equal(ua.action, 'update');
+  assert.deepEqual(ua.collectionIds, ['101']);
+  assert.equal(ua.marginRule, 'percentage:20');
+  assert.equal(ua.price, '15.49');
 
-  assert.equal(r.summary.update, 2);
+  assert.equal(r.summary.update, 3);
   assert.equal(r.summary.create, 0);
   assert.equal(r.summary.skipNew, 1);
   assert.equal(r.summary.draftNoCost, 1);
@@ -91,9 +95,9 @@ test('dry-run: verificações do resumo', async () => {
   assert.equal(r.checks.noMarginRule, 1);           // BELOW
   assert.equal(r.checks.belowCostVat, 1);
   assert.equal(r.checks.belowCostVatSample[0].sku, 'BELOW');
-  // Ativos na loja em que o sync não toca: UNMAPPED-ATIVO e o produto de outro fornecedor.
-  assert.equal(r.checks.untouchedActive, 2);
-  assert.deepEqual(r.checks.untouchedActiveSample.map((x: any) => x.sku).sort(), ['OUTRO-FORNECEDOR', 'UNMAPPED-ATIVO']);
+  // Ativos na loja em que o sync não toca: só o produto de outro fornecedor.
+  assert.equal(r.checks.untouchedActive, 1);
+  assert.deepEqual(r.checks.untouchedActiveSample.map((x: any) => x.sku), ['OUTRO-FORNECEDOR']);
 });
 
 test('dry-run não escreve IDs no SQLite', async () => {
