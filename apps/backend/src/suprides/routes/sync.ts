@@ -540,6 +540,7 @@ export async function runFullShopifySync(opts: {
     const draftOnlySkus = new Set<string>();
     const shopCollectionSkus = new Set<string>();
     const shopBySku = new Map<string, SnapshotProduct>();
+    const shopById = new Map<number, SnapshotProduct>(shopProducts.map(sp => [sp.productId, sp]));
     for (const sp of shopProducts) if (sp.sku && !shopBySku.has(sp.sku)) shopBySku.set(sp.sku, sp);
     const filtrados = all.filter(p => {
       if (resume && syncedSkus.has(p.sku)) return false;
@@ -765,7 +766,10 @@ export async function runFullShopifySync(opts: {
           price, compare_at_price: pvpr ?? null, barcode: p.ean,
           ...(weightGrams !== undefined ? { weight: weightGrams, weight_unit: 'g' } : {})
         });
-        if (shopifyInventoryItemId && costPrice !== null) {
+        // Custo igual ao que a loja já tem (cópia lida no início) → não reenviar.
+        const shopCost = shopById.get(shopifyProductId)?.cost;
+        const costUnchanged = shopCost != null && Math.abs(Number(shopCost) - Number(costPrice)) < 0.005;
+        if (shopifyInventoryItemId && costPrice !== null && !costUnchanged) {
           try { await setInventoryCost(shopifyInventoryItemId, costPrice); } catch (ce: any) { console.warn('[Suprides] setInventoryCost falhou:', ce?.message); }
         }
         markDone(p, 'updated');
@@ -872,8 +876,10 @@ export async function runFullShopifySync(opts: {
           }
         }
 
+        // Coleções onde o produto já está (segundo a cópia lida no início) não se reenviam.
+        const alreadyIn = new Set(shopById.get(shopifyProductId)?.collectionIds ?? []);
         await Promise.all([
-          ...(shopCurrent ? [] : collectionIds).map(async cid => {
+          ...(shopCurrent ? [] : collectionIds.filter(cid => !alreadyIn.has(cid))).map(async cid => {
             const numId = await resolveNumericCollId(cid);
             if (numId) await addProductToCollection(shopifyProductId!, numId);
           }),
