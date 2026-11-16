@@ -401,6 +401,8 @@ export async function runFullShopifySync(opts: {
   resume?: boolean; dryRun?: boolean;
   /** Só para testes: substitui a leitura da loja (apenas em dryRun). */
   readShop?: () => Promise<SnapshotProduct[]>;
+  /** Não enviar imagens neste sync (ficam por enviar; ver /sync-images). */
+  skipImages?: boolean;
 } = {}) {
   if (fullSyncRunning) throw Object.assign(new Error('Já há uma sincronização em curso'), { code: 'BUSY' });
   fullSyncRunning = true;
@@ -864,7 +866,7 @@ export async function runFullShopifySync(opts: {
         // Imagens: reconciliação idempotente. Lê as imagens reais do Shopify e
         // adiciona só as que faltam (comparadas por filename), nunca reenvia o
         // conjunto inteiro — elimina a duplicação dos syncs anteriores.
-        if (imageUrls.length > 0 && skuImagesSynced.get(p.sku) !== true) {
+        if (!opts.skipImages && imageUrls.length > 0 && skuImagesSynced.get(p.sku) !== true) {
           try {
             const { complete } = await reconcileProductImages(shopifyProductId, imageUrls);
             if (complete) {

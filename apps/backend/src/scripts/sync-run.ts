@@ -4,6 +4,7 @@
  *   npm run sync:run -- --dry-run          simulação; grava o plano em data/plans/
  *   npm run sync:run                       sync real → cópia da loja depois → sync:verify com o último plano
  *   npm run sync:run -- --resume           retoma uma execução interrompida (salta os SKUs já enviados)
+ *   --no-images                            não envia imagens (ficam por enviar para um envio à parte)
  *
  * Não correr ao mesmo tempo que um sync lançado pela app.
  */
@@ -32,11 +33,12 @@ function latestPlan(): string | null {
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const resume = process.argv.includes("--resume");
+  const skipImages = process.argv.includes("--no-images");
   ensureSupridesTable();
   ensureSupridesTagTables();
 
   console.log(`${ts()} — início (${dryRun ? "simulação" : resume ? "retomar" : "sync real"})`);
-  const r: any = await runFullShopifySync({ dryRun, resume });
+  const r: any = await runFullShopifySync({ dryRun, resume, skipImages });
 
   if (dryRun) {
     const dir = dataPath("plans");
