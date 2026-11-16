@@ -52,6 +52,12 @@ export function ensureSupridesTable(): void {
   } catch {
     // Coluna já existe — ignorar
   }
+  // Quando o sync completo enviou este SKU pela última vez (para retomar uma execução interrompida).
+  try {
+    db.exec(`ALTER TABLE suprides_products ADD COLUMN shopify_synced_at TEXT`);
+  } catch {
+    // Coluna já existe — ignorar
+  }
   // Índice sempre criado depois de garantir que a coluna existe
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sp_node ON suprides_products (shopify_node_id)`);
 

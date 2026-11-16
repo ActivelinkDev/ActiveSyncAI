@@ -437,12 +437,25 @@ export async function runFullShopifySync(opts: {
     const db = getSqlite();
 
     // Produtos já sincronizados (para modo resume)
-    const syncedSkus = resume
+    // Retomar: saltar só os SKUs já enviados na execução interrompida (registada em sync-run.json).
+    // Se a última execução terminou (ou não há registo), "retomar" faz um sync completo.
+    const runFile = dataPath('suprides', 'sync-run.json');
+    let lastRun: { startedAt: string; finishedAt: string | null } | null = null;
+    try { lastRun = JSON.parse(fs.readFileSync(runFile, 'utf8')); } catch { /* sem registo */ }
+    const resumeSince = resume && lastRun && !lastRun.finishedAt ? lastRun.startedAt : null;
+    const syncedSkus = resumeSince
       ? new Set(
-          (db.prepare("SELECT sku FROM suprides_products WHERE shopify_product_id IS NOT NULL").all() as { sku: string }[])
+          (db.prepare('SELECT sku FROM suprides_products WHERE shopify_synced_at >= ?').all(resumeSince) as { sku: string }[])
             .map(r => r.sku)
         )
       : new Set<string>();
+    const runStartedAt = resumeSince ?? new Date().toISOString();
+    if (!dryRun) {
+      fs.mkdirSync(path.dirname(runFile), { recursive: true });
+      fs.writeFileSync(runFile, JSON.stringify({ startedAt: runStartedAt, finishedAt: null }, null, 1));
+      if (resumeSince) logLine(`[Suprides] A retomar a execução de ${resumeSince}: ${syncedSkus.size} produtos já enviados ficam de fora`);
+    }
+    const markSynced = db.prepare('UPDATE suprides_products SET shopify_synced_at = ? WHERE sku = ?');
 
     // Pré-carregar IDs Shopify já conhecidos do SQLite (evita findVariantBySku + garante que produtos
     // previamente sincronizados continuam a ser incluídos mesmo que shopify_node_id esteja vazio)
@@ -883,6 +896,7 @@ export async function runFullShopifySync(opts: {
           if (!p) break;
           try {
             await processProduct(p);
+            if (!dryRun) markSynced.run(new Date().toISOString(), p.sku);
           } catch (e: any) {
             if (e?.cancelled || e?.code === 'ERR_CANCELED') break;
             const errDetail = e?.response?.data || e?.message || String(e);
@@ -980,6 +994,9 @@ export async function runFullShopifySync(opts: {
 
     const wasCancelled = syncCancelled;
     syncCancelled = false;
+    if (!wasCancelled) {
+      fs.writeFileSync(runFile, JSON.stringify({ startedAt: runStartedAt, finishedAt: new Date().toISOString() }, null, 1));
+    }
     if (noCostHidden.length || noCostSkipped.length) {
       console.warn(`[Suprides] Sem preço de custo: ${noCostHidden.length} passados a draft, ${noCostSkipped.length} não criados`);
     }
