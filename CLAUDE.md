@@ -16,8 +16,11 @@ npm run build && npm start # compilar e arrancar dist/
 npx tsc --noEmit           # verificação de tipos
 npm run shopify:snapshot   # estado atual da loja → JSON
 npm run import:esprinet
+npm run auth:set-password  # criar/repor a conta (no servidor, consola interativa)
+npm run secrets:init       # gera SECRETS_KEY no .env e cifra credenciais em data/
+npm test                   # testes (node:test)
 
-# Frontend (apps/frontend) — porta 4200
+# Frontend (apps/frontend) — porta 4200 (proxy /api → 127.0.0.1:3004)
 npm start
 npm run build -- --configuration production
 
@@ -62,6 +65,12 @@ Rotas Angular: só `/dashboard` e `/erros`; o resto são diálogos.
 - Produto **retirado pelo fornecedor** → rascunho, nunca apagado (travão a 85 % na importação).
 - Importação, sync completo e sync de stock partilham um lock (409 se já houver um a correr).
 - O agendamento está **desligado por omissão** (`AUTO_SYNC_ENABLED`); só o servidor de produção o liga.
+
+## Segurança (Etapa 3)
+- Todos os pedidos: filtro pelo IP real (`ALLOWED_SUBNETS`), sessão obrigatória em `/api` (exceto login), `Origin` da própria app nas escritas. Ver `src/security/`.
+- HTTPS com `TLS_PFX` (certificado de `deploy/windows/create-cert.ps1`); sem TLS só escuta em 127.0.0.1.
+- CSP só da própria origem: **não** usar scripts em linha, CDNs nem Google Fonts no frontend.
+- Credenciais nunca saem inteiras da API (`connection-view.ts`).
 
 ## Dados e configuração
 - Tudo em `DATA_DIR` (por omissão `apps/backend/data/`): SQLite + configs JSON editáveis pela interface (que têm prioridade sobre o `.env`).
