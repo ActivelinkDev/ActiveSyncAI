@@ -4,7 +4,7 @@ Orientações para o Claude Code neste repositório.
 
 ## O que é
 
-Middleware que importa o catálogo de fornecedores (**Suprides**; **Esprinet** em curso) para **SQLite** local, calcula preços (margem por coleção + IVA + arredondamento), gera tags por IA (OpenAI) e publica na **Shopify** (produtos, preço, stock, imagens, coleções, menu).
+Middleware que importa o catálogo de fornecedores (**Suprides**; a Esprinet foi retirada em 18/11) para **SQLite** local, calcula preços (margem por coleção + IVA + arredondamento), gera tags por IA (OpenAI) e publica na **Shopify** (produtos, preço, stock, imagens, coleções, menu).
 Já não usa MSSQL/ERP, Haeger nem Macorlux — se encontrares referências a isso, são restos do projeto de origem.
 
 ## Comandos
@@ -15,7 +15,6 @@ npm run dev                # ts-node-dev com hot reload
 npm run build && npm start # compilar e arrancar dist/
 npx tsc --noEmit           # verificação de tipos
 npm run shopify:snapshot   # estado atual da loja → JSON
-npm run import:esprinet
 npm run auth:set-password  # criar/repor a conta (no servidor, consola interativa)
 npm run secrets:init       # gera SECRETS_KEY no .env e cifra credenciais em data/
 npm test                   # testes (node:test)
@@ -42,7 +41,6 @@ apps/backend/src/
   services/scheduler.ts    sync diário (importação + sync Shopify), lock partilhado
   scripts/                 comandos npm (snapshot, importação Esprinet)
   suprides/                núcleo: api/ (clientes Suprides e Shopify), routes/, services/, repositories/
-  esprinet/                2.º fornecedor (em curso; ainda sem sync para a Shopify)
 apps/frontend/src/app/
   ui/windows-shell/        shell: barra de título, painel de logs, barra de estado
   pages/                   funcionalidades em MatDialog (Mapeamento, Margens, Tags, Preferências…)
