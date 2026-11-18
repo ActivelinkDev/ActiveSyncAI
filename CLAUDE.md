@@ -39,7 +39,7 @@ apps/backend/src/
   utils/data-dir.ts        DATA_ROOT / dataPath() — todos os caminhos de dados passam por aqui
   utils/logger.ts          logLine() → SSE /api/logs/stream (aparece no painel da interface)
   services/scheduler.ts    sync diário (importação + sync Shopify), lock partilhado
-  scripts/                 comandos npm (snapshot, importação Esprinet)
+  scripts/                 comandos npm (snapshot, restauro, sync, imagens, conta, credenciais)
   suprides/                núcleo: api/ (clientes Suprides e Shopify), routes/, services/, repositories/
 apps/frontend/src/app/
   ui/windows-shell/        shell: barra de título, painel de logs, barra de estado

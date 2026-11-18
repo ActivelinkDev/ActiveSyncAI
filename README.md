@@ -1,6 +1,6 @@
 # ActiveSyncAI
 
-Middleware que importa o catálogo de fornecedores (Suprides; Esprinet em curso) para uma base de dados SQLite local, calcula preços (margem por coleção + IVA + arredondamento), enriquece os produtos com tags geradas por IA e publica-os numa loja Shopify (produtos, preço, stock, imagens, coleções e menu).
+Middleware que importa o catálogo de fornecedores (Suprides) para uma base de dados SQLite local, calcula preços (margem por coleção + IVA + arredondamento), enriquece os produtos com tags geradas por IA e publica-os numa loja Shopify (produtos, preço, stock, imagens, coleções e menu).
 
 ## Stack
 
@@ -32,7 +32,6 @@ Copiar `apps/backend/.env.example` para `apps/backend/.env` e preencher.
 | `npm run dev` | Servidor em modo desenvolvimento (porta 3004) |
 | `npm run build` / `npm start` | Compilar e arrancar a versão compilada |
 | `npm run shopify:snapshot` | Cópia do estado atual da loja para JSON |
-| `npm run import:esprinet` | Importação do catálogo Esprinet |
 
 ### Frontend (`apps/frontend`)
 | Comando | Ação |
