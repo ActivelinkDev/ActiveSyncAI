@@ -16,8 +16,8 @@ import { getMssql, closeMssql, mssqlConfigured } from "../db/mssql";
     const info = (await sql<any>`SELECT DB_NAME() AS base, SUSER_SNAME() AS utilizador,
         CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(50)) AS versao,
         CAST(SERVERPROPERTY('Edition') AS nvarchar(100)) AS edicao,
-        (SELECT encrypt_option FROM sys.dm_exec_connections WHERE session_id = @@SPID) AS cifrada`.execute(db)).rows[0];
-    console.log(`Ligado: base ${info.base}, utilizador ${info.utilizador}, SQL Server ${info.versao} (${info.edicao}), ligação cifrada: ${info.cifrada}`);
+        CAST(CONNECTIONPROPERTY('net_transport') AS nvarchar(40)) AS transporte`.execute(db)).rows[0];
+    console.log(`Ligado: base ${info.base}, utilizador ${info.utilizador}, SQL Server ${info.versao} (${info.edicao}), via ${info.transporte}, ligação cifrada (MSSQL_ENCRYPT=${process.env.MSSQL_ENCRYPT ?? "1"})`);
 
     const roles = (await sql<any>`SELECT r.name FROM sys.database_role_members m
         JOIN sys.database_principals r ON r.principal_id = m.role_principal_id
