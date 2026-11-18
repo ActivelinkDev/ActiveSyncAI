@@ -83,13 +83,13 @@ export function requireSession(): RequestHandler {
 // ----- Origem (CSRF): escritas só a partir da própria app -----
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 export function requireSameOrigin(): RequestHandler {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     if (SAFE.has(req.method) || !req.path.startsWith('/api/')) return next();
     const origin = req.headers.origin;
     let ok = false;
     try { ok = !!origin && new URL(origin).host === req.headers.host; } catch { ok = false; }
     if (!ok) {
-      audit('access.denied.origin', { ip: clientIp(req), detail: `${req.method} ${req.path} origin=${origin ?? '-'}` });
+      await audit('access.denied.origin', { ip: clientIp(req), detail: `${req.method} ${req.path} origin=${origin ?? '-'}` });
       res.status(403).json({ error: 'bad_origin' });
       return;
     }
@@ -115,9 +115,9 @@ export function dangerousAction(req: Request) {
 }
 
 export function auditDangerousActions(): RequestHandler {
-  return (req, _res, next) => {
+  return async (req, _res, next) => {
     const d = dangerousAction(req);
-    if (d) audit('action', { ip: clientIp(req), user: req.session?.username, detail: `${d.label} (${req.method} ${req.path})` });
+    if (d) await audit('action', { ip: clientIp(req), user: req.session?.username, detail: `${d.label} (${req.method} ${req.path})` });
     next();
   };
 }

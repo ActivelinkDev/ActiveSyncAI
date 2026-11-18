@@ -9,7 +9,8 @@ import logsRouter from "./routes/logs";
 import dashboardRoutes from "./routes/dashboard";
 import systemStatsRouter, { systemInfoRouter } from "./routes/system-stats";
 import supridesRouter from "./suprides/index";
-import { ensureSupridesTable, ensureSupridesTagTables } from "./db/migrate-suprides";
+import { migrateMssql } from "./db/mssql-migrations";
+import { closeMssql } from "./db/mssql";
 import { schedulerRouter, startScheduler } from "./services/scheduler";
 import { DATA_ROOT } from "./utils/data-dir";
 import { effectiveSubnets, ipFilter, isLoopback } from "./security/ip-filter";
@@ -18,6 +19,7 @@ import {
   configureSecurity, securityHeaders, requireSession, requireSameOrigin,
   auditDangerousActions, errorHandler,
 } from "./security/middleware";
+import { withConnectionSettings } from "./suprides/repositories/store";
 import authRouter from "./security/auth-routes";
 import { loadAccount } from "./security/password";
 import { installCrashAlerts, alertsConfigured } from "./services/alerts";
@@ -63,6 +65,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use(requireSameOrigin());
 app.use(requireSession());
 app.use(auditDangerousActions());
+app.use("/api", (_req, _res, next) => withConnectionSettings(next));
 
 app.use("/api/auth",         authRouter);
 app.use("/api/logs",         logsRouter);
@@ -94,23 +97,22 @@ const server = tls
 server.headersTimeout = 30_000;
 server.requestTimeout = 0; // SSE de longa duração
 
-server.listen(PORT, HOST, () => {
-  console.log(`Backend ON : ${tls ? "https" : "http"}://${HOST}:${PORT}`);
-  console.log(`Dados em   : ${DATA_ROOT}`);
-  console.log(`Acesso     : ${subnetSource === "config" ? `${subnets.length} sub-rede(s) configurada(s) + este PC` : "redes internas (10.x, 172.16-31.x, 192.168.x) + este PC"}`);
-  console.log(`Alertas    : ${alertsConfigured() ? "email ativo" : "email não configurado (só no log)"}`);
-  if (!loadAccount()) console.warn("[segurança] Conta não configurada — correr: npm run auth:set-password");
+async function start() {
+  await migrateMssql();
+  if (!await loadAccount()) console.warn("[segurança] Conta não configurada — correr: npm run auth:set-password");
+  server.listen(PORT, HOST, () => {
+    console.log(`Backend ON : ${tls ? "https" : "http"}://${HOST}:${PORT}`);
+    console.log(`Dados em   : ${DATA_ROOT}`);
+    console.log(`Acesso     : ${subnetSource === "config" ? `${subnets.length} sub-rede(s) configurada(s) + este PC` : "redes internas (10.x, 172.16-31.x, 192.168.x) + este PC"}`);
+    console.log(`Alertas    : ${alertsConfigured() ? "email ativo" : "email não configurado (só no log)"}`);
+    startScheduler();
+  });
+}
 
-  try {
-    ensureSupridesTable();
-    ensureSupridesTagTables();
-    console.log("[sqlite] supplier tables ok");
-  } catch (err) {
-    console.error("[sqlite] Failed to ensure supplier tables:", err);
-    process.exit(1);
-  }
-
-  startScheduler();
+start().catch(async err => {
+  console.error("[arranque] Falhou a inicialização do SQL Server:", err.message);
+  await closeMssql();
+  process.exitCode = 1;
 });
 
 process.on("SIGINT", () => {
