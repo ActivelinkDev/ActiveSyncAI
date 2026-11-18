@@ -18,13 +18,13 @@
   transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
 
   // Inactive state — muted, outlined
-  background: #f1f5f9;
-  color: #64748b;
-  border: 1.5px solid #cbd5e1;
+  background: var(--surface-2);
+  color: var(--muted);
+  border: 1.5px solid var(--line-strong);
 
   &:hover {
-    background: #e2e8f0;
-    color: #475569;
+    background: var(--line-strong);
+    color: var(--muted);
     transform: scale(1.04);
   }
 
@@ -43,7 +43,7 @@
 
 .pill-empty {
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--muted-2);
   font-style: italic;
   padding: 4px 0;
 }
