@@ -406,3 +406,51 @@ mat-divider.sm-divider { border-color: var(--line-strong); }
   color: #fff !important;
   box-shadow: 0 2px 8px rgba(59,130,246,.35) !important;
 }
+
+/* ============================================================
+   Versão leve (tema escuro corporativo): lista lisa com separadores,
+   sem cartões dentro de cartões; cor só no que é ação ou estado.
+   ============================================================ */
+:host {
+  .sm-tree { padding: 4px 18px 8px !important; }
+
+  .tree-node {
+    border: 0 !important; background: transparent !important; box-shadow: none !important;
+    margin: 0 !important; border-radius: 0 !important;
+  }
+  .node-row {
+    background: transparent !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+    border-bottom: 1px solid var(--line) !important;
+    padding: 6px 8px !important; min-height: 42px; transition: background .12s;
+  }
+  .node-row:hover { background: var(--hover) !important; }
+
+  .tree-node.line > .node-row .node-name { font-weight: 600 !important; color: var(--ink) !important; }
+  .tree-node.family > .node-row .node-name,
+  .tree-node.subfamily > .node-row .node-name { font-weight: 500 !important; color: var(--muted) !important; }
+
+  .type-icon { color: var(--muted-2) !important; opacity: .9; }
+  .expand-icon { color: var(--muted-2) !important; }
+
+  .tree-children {
+    background: transparent !important; border: 0 !important;
+    border-left: 1px solid var(--line) !important;
+    margin-left: 18px !important; padding-left: 6px !important;
+  }
+
+  .mode-sel, .val-wrap {
+    background: transparent !important; box-shadow: none !important;
+    border: 1px solid var(--line) !important; border-radius: 8px !important;
+  }
+  .node-row:hover .mode-sel, .node-row:hover .val-wrap { border-color: var(--line-strong) !important; }
+  .val-input { background: transparent !important; color: var(--ink) !important; }
+  .val-suffix { color: var(--muted-2) !important; }
+  .val-clear { opacity: 0; transition: opacity .12s; color: var(--muted) !important; background: transparent !important; }
+  .node-row:hover .val-clear { opacity: 1; }
+
+  .legend-item {
+    background: transparent !important; color: var(--muted) !important;
+    border: 1px solid var(--line-strong) !important;
+  }
+  .sm-settings-row, .sm-legend { background: transparent !important; }
+}
