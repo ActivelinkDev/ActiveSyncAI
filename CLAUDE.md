@@ -18,6 +18,7 @@ npm run shopify:snapshot   # estado atual da loja → JSON
 npm run auth:set-password  # criar/repor a conta (no servidor, consola interativa)
 npm run secrets:init       # gera SECRETS_KEY no .env e cifra credenciais em data/
 npm test                   # testes (node:test)
+npm run alert:test         # email de teste dos alertas (SMTP_* e ALERT_* no .env)
 
 # Frontend (apps/frontend) — porta 4200 (proxy /api → 127.0.0.1:3004)
 npm start

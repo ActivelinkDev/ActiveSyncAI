@@ -20,6 +20,9 @@ import {
 } from "./security/middleware";
 import authRouter from "./security/auth-routes";
 import { loadAccount } from "./security/password";
+import { installCrashAlerts, alertsConfigured } from "./services/alerts";
+
+installCrashAlerts();
 
 /* ── Configuração de rede ──────────────────────────────────────────────
  * TLS_PFX (+ TLS_PFX_PASSPHRASE) ou TLS_CERT + TLS_KEY → HTTPS.
@@ -95,6 +98,7 @@ server.listen(PORT, HOST, () => {
   console.log(`Backend ON : ${tls ? "https" : "http"}://${HOST}:${PORT}`);
   console.log(`Dados em   : ${DATA_ROOT}`);
   console.log(`Acesso     : ${subnetSource === "config" ? `${subnets.length} sub-rede(s) configurada(s) + este PC` : "redes internas (10.x, 172.16-31.x, 192.168.x) + este PC"}`);
+  console.log(`Alertas    : ${alertsConfigured() ? "email ativo" : "email não configurado (só no log)"}`);
   if (!loadAccount()) console.warn("[segurança] Conta não configurada — correr: npm run auth:set-password");
 
   try {

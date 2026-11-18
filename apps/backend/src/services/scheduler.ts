@@ -1,6 +1,7 @@
 import fs from "fs";
 import { Router } from "express";
 import { logLine } from "../utils/logger";
+import { sendAlert } from "./alerts";
 import { dataPath } from "../utils/data-dir";
 import { runSupridesImport, isImportRunning } from "../suprides/services/import-suprides";
 import { runFullShopifySync, isFullSyncRunning } from "../suprides/routes/sync";
@@ -104,9 +105,28 @@ export async function runDailySync(trigger: RunRecord["trigger"]): Promise<RunRe
       `Shopify ${rec.shopify.created} criados, ${rec.shopify.updated} atualizados, ${rec.shopify.errors} erros, ` +
       `${rec.shopify.noCostHidden} sem custo passados a draft`
     );
+    if (r.cancelled) {
+      await sendAlert("sync-cancelled", "Sync diário cancelado", `A sincronização (${trigger}) foi cancelada antes de terminar. Retomar com run-sync / --resume.`);
+    } else if (rec.shopify.errors > 0) {
+      const sample = (Array.isArray(r.errors) ? r.errors : []).slice(0, 10)
+        .map((e: any) => `- ${e?.sku ?? "?"}: ${String(e?.error ?? e?.message ?? e).slice(0, 200)}`).join("\n");
+      await sendAlert("sync-errors", `Sync diário com ${rec.shopify.errors} erro(s)`,
+        `A sincronização terminou, mas ${rec.shopify.errors} produto(s) falharam.
+
+Primeiros erros:
+${sample}
+
+Importados ${imp.saved}, retirados ${imp.removed}; atualizados ${rec.shopify.updated}.`);
+    }
   } catch (err: any) {
     rec.error = err?.message ?? String(err);
     logLine(`[Agendamento] FALHOU no passo "${rec.step}": ${rec.error}`);
+    await sendAlert("sync-failed", `Sync diário FALHOU (${rec.step === "import" ? "importação Suprides" : "envio para a Shopify"})`,
+      `O sync (${trigger}) parou no passo "${rec.step}".
+
+Erro: ${rec.error}
+
+A loja não foi totalmente atualizada. Ver o registo no painel da app.`);
   } finally {
     rec.finishedAt = new Date().toISOString();
     running = false;

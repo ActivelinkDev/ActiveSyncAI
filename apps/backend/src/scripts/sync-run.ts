@@ -15,6 +15,7 @@ import { ensureSupridesTable, ensureSupridesTagTables } from "../db/migrate-supr
 import { runFullShopifySync } from "../suprides/routes/sync";
 import { takeSnapshot } from "../services/shopify-snapshot";
 import { verifyPlan } from "../services/sync-verify";
+import { sendAlert } from "../services/alerts";
 import { dataPath } from "../utils/data-dir";
 
 const ts = () => new Date().toLocaleString("pt-PT");
@@ -58,6 +59,12 @@ async function main() {
     fs.mkdirSync(path.dirname(errFile), { recursive: true });
     fs.writeFileSync(errFile, JSON.stringify(errors, null, 1));
     console.log(`Erros gravados em ${errFile}`);
+    await sendAlert("sync-errors", `Sync manual com ${errors.length} erro(s)`,
+      `O sync terminou, mas ${errors.length} produto(s) falharam.
+
+Primeiros erros:
+` +
+      errors.slice(0, 10).map((e: any) => `- ${e?.sku ?? "?"}: ${String(e?.error ?? e?.message ?? e).slice(0, 200)}`).join("\n"));
   }
   if (r.cancelled) { console.log(`${ts()} — cancelado; retomar com --resume`); return; }
 
@@ -72,7 +79,21 @@ async function main() {
   const out = planFile.replace(/\.json$/, "") + "-verify.json";
   fs.writeFileSync(out, JSON.stringify({ snapshot: path.basename(after.file), ...v }, null, 1));
   console.log(`Verificação (${path.basename(planFile)}): ${v.ok}/${v.checked} sem diferenças; por campo:`, v.mismatchesByField);
+  if (v.checked - v.ok > 0) {
+    await sendAlert("verify-mismatch", `Verificação: ${v.checked - v.ok} produto(s) diferentes do plano`,
+      `Depois do sync, ${v.checked - v.ok} de ${v.checked} produtos não ficaram como planeado.
+
+Por campo: ${JSON.stringify(v.mismatchesByField)}
+
+Relatório no servidor: ${path.basename(out)}`);
+  }
   console.log(`${ts()} — fim. Relatório: ${out}`);
 }
 
-main().catch(e => { console.error(`${ts()} — ERRO:`, e?.response?.data ?? e?.message ?? e); process.exit(1); });
+main().catch(async e => {
+  console.error(`${ts()} — ERRO:`, e?.response?.data ?? e?.message ?? e);
+  await sendAlert("sync-failed", "Sync manual FALHOU", `O sync parou com erro: ${e?.message ?? e}
+
+Retomar com --resume.`);
+  process.exit(1);
+});
