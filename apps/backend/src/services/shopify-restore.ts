@@ -122,11 +122,6 @@ mutation($metafields: [MetafieldIdentifierInput!]!) {
   metafieldsDelete(metafields: $metafields) { userErrors { field message } }
 }`;
 
-const COLLECTION_REMOVE = `
-mutation($id: ID!, $productIds: [ID!]!) {
-  collectionRemoveProducts(id: $id, productIds: $productIds) { job { id } userErrors { field message } }
-}`;
-
 function checkUserErrors(what: string, r: any): void {
   const errs = r?.userErrors ?? [];
   if (errs.length) throw new Error(`${what}: ${errs.map((e: any) => e.message).join('; ')}`);
@@ -143,18 +138,18 @@ export async function applyRestore(
   const http = makeGraphqlClient();
   const beforeById = new Map(before.map(p => [p.productId, p]));
   const result: ApplyResult = { productsUpdated: 0, collectionRemovals: 0, errors: [] };
-  const byCollection = new Map<string, number[]>();
   let done = 0;
 
   for (const d of diff.products) {
     const b = beforeById.get(d.productId)!;
     const fields = new Set(d.changes.map(c => c.field));
     try {
-      if (fields.has('status') || fields.has('title') || fields.has('descriptionHtml')) {
+      if (fields.has('status') || fields.has('title') || fields.has('descriptionHtml') || d.removeCollections.length) {
         const product: Record<string, unknown> = { id: gid('Product', d.productId) };
         if (fields.has('status')) product.status = b.status;
         if (fields.has('title')) product.title = b.title;
         if (fields.has('descriptionHtml')) product.descriptionHtml = b.descriptionHtml ?? '';
+        if (d.removeCollections.length) product.collectionsToLeave = d.removeCollections.map(cid => gid('Collection', cid));
         const r: any = await gql(http, PRODUCT_UPDATE, { product });
         checkUserErrors('productUpdate', r.productUpdate);
       }
@@ -164,7 +159,7 @@ export async function applyRestore(
         const v: Record<string, unknown> = { id: gid('ProductVariant', d.variantId) };
         if (fields.has('price')) v.price = b.price;
         if (fields.has('compareAtPrice')) v.compareAtPrice = b.compareAtPrice;
-        if (fields.has('barcode')) v.barcode = b.barcode ?? '';
+        if (fields.has('barcode')) v.barcodes = b.barcode ? [{ value: b.barcode }] : [];
         const inv: Record<string, unknown> = {};
         if (fields.has('cost')) inv.cost = b.cost;
         if (fields.has('weight') && b.weight) inv.measurement = { weight: { unit: b.weight.unit, value: b.weight.value } };
@@ -188,10 +183,7 @@ export async function applyRestore(
         }
       }
 
-      for (const cid of d.removeCollections) {
-        if (!byCollection.has(cid)) byCollection.set(cid, []);
-        byCollection.get(cid)!.push(d.productId);
-      }
+      result.collectionRemovals += d.removeCollections.length;
       if (d.changes.length) result.productsUpdated++;
     } catch (e: any) {
       result.errors.push({ productId: d.productId, error: e?.message ?? String(e) });
@@ -199,18 +191,5 @@ export async function applyRestore(
     onProgress?.(++done, diff.products.length);
   }
 
-  // Coleções: agrupadas, até 250 produtos por chamada.
-  for (const [cid, ids] of byCollection) {
-    for (let i = 0; i < ids.length; i += 250) {
-      const chunk = ids.slice(i, i + 250);
-      try {
-        const r: any = await gql(http, COLLECTION_REMOVE, { id: gid('Collection', cid), productIds: chunk.map(id => gid('Product', id)) });
-        checkUserErrors('collectionRemoveProducts', r.collectionRemoveProducts);
-        result.collectionRemovals += chunk.length;
-      } catch (e: any) {
-        for (const pid of chunk) result.errors.push({ productId: pid, error: `coleção ${cid}: ${e?.message ?? e}` });
-      }
-    }
-  }
   return result;
 }
