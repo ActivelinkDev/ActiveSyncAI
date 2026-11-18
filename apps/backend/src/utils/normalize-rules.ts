@@ -1,5 +1,5 @@
 // Funções puras de normalização de valores de tags — sem dependências de DB.
-// Importado por suprides/routes/tags.ts (SQLite).
+// Importado por suprides/routes/tags.ts.
 
 function stripDiacritics(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
