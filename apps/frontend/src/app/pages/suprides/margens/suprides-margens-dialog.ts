@@ -49,11 +49,9 @@ export class SupridesMargensDialog implements OnInit {
   supplierIndex = 0;
   readonly suppliers: { key: SupplierKey; label: string }[] = [
     { key: 'suprides', label: 'Suprides' },
-    { key: 'esprinet', label: 'Esprinet' },
   ];
   get activeSupplier(): SupplierKey { return this.suppliers[this.supplierIndex].key; }
   get activeSupplierLabel(): string { return this.suppliers[this.supplierIndex].label; }
-  get isEsprinet(): boolean { return this.activeSupplier === 'esprinet'; }
 
   loading = true;
   saving  = false;

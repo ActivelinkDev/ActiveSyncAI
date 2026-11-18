@@ -57,11 +57,10 @@ interface ProdGrupoNode {
 })
 
 export class TagsDialog implements OnInit, OnDestroy {
-    tagsSource: 'suprides' | 'esprinet' = 'suprides';
+    tagsSource: 'suprides' = 'suprides';
     supplierIndex = 0;
-    readonly supplierTabs: { key: 'suprides' | 'esprinet'; label: string }[] = [
+    readonly supplierTabs: { key: 'suprides'; label: string }[] = [
       { key: 'suprides', label: 'Suprides' },
-      { key: 'esprinet', label: 'Esprinet' },
     ];
 
     get activeSupplierLabel(): string {

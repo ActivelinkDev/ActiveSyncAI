@@ -72,12 +72,10 @@ export class SupridesMapeamentoDialog implements OnInit, OnDestroy {
   supplierIndex = 0;
   readonly suppliers: { key: SupplierKey; label: string }[] = [
     { key: 'suprides', label: 'Suprides' },
-    { key: 'esprinet', label: 'Esprinet' },
   ];
 
   get activeSupplier(): SupplierKey { return this.suppliers[this.supplierIndex].key; }
   get activeSupplierLabel(): string { return this.suppliers[this.supplierIndex].label; }
-  get isEsprinet(): boolean { return this.activeSupplier === 'esprinet'; }
 
   loading = true;
   error = '';
@@ -873,7 +871,7 @@ export class SupridesMapeamentoDialog implements OnInit, OnDestroy {
 
   refreshCache(): void {
     this.loading = true;
-    const request = this.isEsprinet ? this.svc.getFamilias(true) : this.svc.refreshFamiliasCache();
+    const request = this.svc.refreshFamiliasCache();
     request.subscribe({
       next: (familias) => {
         this.familiaTree = familias;

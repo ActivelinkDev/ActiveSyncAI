@@ -4,7 +4,6 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "import:esprinet": "ts-node-dev --transpile-only --exit-child src/scripts/import-esprinet.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "shopify:snapshot": "ts-node-dev --transpile-only --exit-child src/scripts/shopify-snapshot.ts",

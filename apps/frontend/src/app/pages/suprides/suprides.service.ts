@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
 const API_ROOT = '' + '/api';
-export type SupplierKey = 'suprides' | 'esprinet';
+export type SupplierKey = 'suprides';
 
 export interface FamiliaTree {
   product_line: string;

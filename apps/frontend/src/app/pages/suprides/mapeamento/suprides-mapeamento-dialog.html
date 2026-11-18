@@ -42,10 +42,6 @@
 
   <!-- BODY -->
   <div class="sd-body" *ngIf="!loading && !error">
-    <mat-tab-group class="supplier-tabs" [selectedIndex]="supplierIndex" (selectedIndexChange)="onSupplierTabChange($event)" animationDuration="120ms">
-      <mat-tab label="Suprides"></mat-tab>
-      <mat-tab label="Esprinet"></mat-tab>
-    </mat-tab-group>
 
     <mat-tab-group class="sd-tabs" animationDuration="150ms" (selectedTabChange)="onTabChange($event.index)">
 
@@ -177,7 +173,7 @@
       </mat-tab>
 
       <!-- ── TAB: SUBFAMÍLIA (Shopify L3 ↔ Suprides Famílias) ── -->
-      <mat-tab *ngIf="!isEsprinet">
+      <mat-tab>
         <ng-template mat-tab-label>
           <mat-icon style="font-size:15px;width:15px;height:15px;margin-right:5px">label_outline</mat-icon>
           Subfamília
@@ -484,7 +480,7 @@
   </div>
 
   <!-- FOOTER (escondido na aba Gerir Menu) -->
-  <div class="sd-footer" *ngIf="!loading && !error && activeTabIndex !== (isEsprinet ? 2 : 3)">
+  <div class="sd-footer" *ngIf="!loading && !error && activeTabIndex !== 3">
     <div class="sd-footer-left">
       <span class="save-confirm" *ngIf="mappingSaved">
         <mat-icon>check_circle</mat-icon> Guardado
@@ -496,11 +492,11 @@
         <mat-icon>{{ savingMapping ? 'hourglass_empty' : 'save' }}</mat-icon>
         {{ savingMapping ? 'A guardar…' : 'Guardar' }}
       </button>
-      <button class="btn-apple btn-apple--secondary" (click)="resumeSync()" *ngIf="!isEsprinet"
+      <button class="btn-apple btn-apple--secondary" (click)="resumeSync()"
               matTooltip="Salta produtos já sincronizados e continua do ponto onde parou">
         <mat-icon>skip_next</mat-icon> Continuar
       </button>
-      <button class="btn-apple btn-apple--primary" (click)="startReview()" *ngIf="!isEsprinet">
+      <button class="btn-apple btn-apple--primary" (click)="startReview()">
         <mat-icon>cloud_upload</mat-icon> Sincronizar
       </button>
     </div>

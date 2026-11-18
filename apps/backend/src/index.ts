@@ -9,9 +9,7 @@ import logsRouter from "./routes/logs";
 import dashboardRoutes from "./routes/dashboard";
 import systemStatsRouter, { systemInfoRouter } from "./routes/system-stats";
 import supridesRouter from "./suprides/index";
-import esprinetRouter from "./esprinet/index";
 import { ensureSupridesTable, ensureSupridesTagTables } from "./db/migrate-suprides";
-import { ensureEsprinetTable } from "./db/migrate-esprinet";
 import { schedulerRouter, startScheduler } from "./services/scheduler";
 import { DATA_ROOT } from "./utils/data-dir";
 import { parseSubnets, ipFilter, isLoopback } from "./security/ip-filter";
@@ -69,7 +67,6 @@ app.use("/api/dashboard",    dashboardRoutes);
 app.use("/api/system/stats", systemStatsRouter);
 app.use("/api/system/info",  systemInfoRouter);
 app.use("/api/suprides",     supridesRouter);
-app.use("/api/esprinet",     esprinetRouter);
 app.use("/api/scheduler",    schedulerRouter);
 app.use("/api", (_req, res) => { res.status(404).json({ error: "not_found" }); });
 
@@ -102,7 +99,6 @@ server.listen(PORT, HOST, () => {
 
   try {
     ensureSupridesTable();
-    ensureEsprinetTable();
     ensureSupridesTagTables();
     console.log("[sqlite] supplier tables ok");
   } catch (err) {

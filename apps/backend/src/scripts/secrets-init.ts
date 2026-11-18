@@ -30,8 +30,7 @@ async function main() {
 
   // Importar só depois de a chave estar no ambiente.
   const sup = await import("../suprides/repositories/store");
-  const esp = await import("../esprinet/repositories/store");
-  for (const [name, store] of [["suprides", sup], ["esprinet", esp]] as const) {
+  for (const [name, store] of [["suprides", sup]] as const) {
     const s = store.loadConnectionSettings() as Record<string, any>;
     const plain = SECRET_FIELDS.filter(f => typeof s[f] === "string" && s[f]);
     if (!plain.length) { console.log(`${name}: sem credenciais guardadas em data/.`); continue; }

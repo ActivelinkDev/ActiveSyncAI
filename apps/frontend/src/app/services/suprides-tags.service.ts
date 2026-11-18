@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom, Observable, Subscriber } from 'rxjs';
 import type { TagGroup, TagValue, Familia, Subfamilia, Produto, ProdutoTagValue } from './tags.service';
 
-type SupplierKey = 'suprides' | 'esprinet';
+type SupplierKey = 'suprides';
 
 interface MenuTreeNode {
   shopifyId: string;
@@ -426,7 +426,7 @@ export class SupridesTagsService {
   restoreDiscardedPair(_w: string): Promise<void> { return Promise.resolve(); }
 
   setSource(s: string): void {
-    if (s === 'suprides' || s === 'esprinet') {
+    if (s === 'suprides') {
       this.supplier = s;
       this.invalidateMenuCache();
     }

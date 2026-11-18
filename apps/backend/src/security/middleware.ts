@@ -104,10 +104,10 @@ export const DANGEROUS: { method: string; path: RegExp; label: string }[] = [
   { method: 'POST', path: /^\/api\/suprides\/sync-stock$/, label: 'Sync de stock para a Shopify' },
   { method: 'POST', path: /^\/api\/suprides\/reconcile-removes$/, label: 'Retirar produtos de coleções na Shopify' },
   { method: 'POST', path: /^\/api\/suprides\/sync-images(\/dedupe)?\/?$/, label: 'Imagens na Shopify' },
-  { method: 'POST', path: /^\/api\/(suprides|esprinet)\/menu\/sync$/, label: 'Menu na Shopify' },
+  { method: 'POST', path: /^\/api\/suprides\/menu\/sync$/, label: 'Menu na Shopify' },
   { method: 'POST', path: /^\/api\/suprides\/public-menu\/publish$/, label: 'Publicar menu na Shopify' },
   { method: 'POST', path: /^\/api\/scheduler\/run-now$/, label: 'Executar agora (importação + sync)' },
-  { method: 'PUT', path: /^\/api\/(suprides|esprinet)\/admin\/(connection|settings)$/, label: 'Alterar ligações/definições' },
+  { method: 'PUT', path: /^\/api\/suprides\/admin\/(connection|settings)$/, label: 'Alterar ligações/definições' },
 ];
 
 export function dangerousAction(req: Request) {
