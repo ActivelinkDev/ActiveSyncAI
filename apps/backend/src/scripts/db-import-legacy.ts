@@ -19,8 +19,8 @@ const REPLACE = process.argv.includes("--replace");
 
 const TARGETS = [
   // ordem de apagar (filhos primeiro)
-  "sp_product_tag_values_normalized", "sp_product_tag_values", "sp_menu_tag_groups", "sp_tag_values",
-  "sp_populate_tags_done", "sp_tag_groups", "suprides_products",
+  "product_tags_normalized", "product_tags", "menu_tag_groups", "tag_values",
+  "ai_tagged_products", "tag_groups", "products",
   "admin_settings", "connection_settings", "ai_prompts", "collection_margins", "line_mappings", "line_to_menu",
   "family_mappings", "collection_mapping", "collection_mapping_hidden", "menu_nodes", "sync_history",
   "sync_latest_products", "app_state", "app_account", "security_audit",
@@ -45,7 +45,7 @@ async function main() {
   await migrateMssql(db);
 
   // Recusa duplicar
-  const existing = (await sql<any>`SELECT (SELECT COUNT(*) FROM suprides_products) AS p, (SELECT COUNT(*) FROM sp_tag_groups) AS t, (SELECT COUNT(*) FROM collection_margins) AS m`.execute(db)).rows[0];
+  const existing = (await sql<any>`SELECT (SELECT COUNT(*) FROM products) AS p, (SELECT COUNT(*) FROM tag_groups) AS t, (SELECT COUNT(*) FROM collection_margins) AS m`.execute(db)).rows[0];
   if ((existing.p || existing.t || existing.m) && !REPLACE) {
     throw new Error(`O SQL Server já tem dados (${existing.p} produtos, ${existing.t} grupos de tags, ${existing.m} margens). Usar --replace para recomeçar.`);
   }
@@ -61,7 +61,7 @@ async function main() {
 
     // ── Produtos ──
     const products = all(`SELECT * FROM suprides_products`).map(r => ({
-      sku: r.sku, ean: r.ean, part_number: r.part_number, brand: r.brand, product_line: r.product_line,
+      supplier: "suprides", sku: r.sku, ean: r.ean, part_number: r.part_number, brand: r.brand, product_line: r.product_line,
       family: r.family, sub_family: r.sub_family, name: r.name, price: r.price, pvpr: r.pvpr, stock: r.stock,
       images: r.images, weight: r.weight, cor: r.cor, description: r.description, manufacturer: r.manufacturer,
       short_description: r.short_description, imported_at: dt(r.imported_at) ?? dt(new Date().toISOString()),
@@ -71,28 +71,28 @@ async function main() {
       stock_status: r.stock_status, removed_at: dt(r.removed_at), shopify_synced_at: dt(r.shopify_synced_at),
       shopify_content_hash: r.shopify_content_hash,
     }));
-    await insertBatched(trx, "suprides_products", products); counts.produtos = products.length;
+    await insertBatched(trx, "products", products); counts.produtos = products.length;
 
     // ── Tags (mantém os IDs dos grupos, porque as outras tabelas apontam para eles) ──
     const groups = all(`SELECT * FROM sp_tag_groups`);
     // SET IDENTITY_INSERT só vale dentro do mesmo pedido: SET + INSERT juntos.
     for (const g of groups) {
-      await sql`SET IDENTITY_INSERT sp_tag_groups ON;
-        INSERT INTO sp_tag_groups (id, supplier, nome, descricao, unidade, created_at)
-        VALUES (${g.id}, ${g.supplier}, ${g.nome}, ${g.descricao}, ${g.unidade}, ${dt(g.created_at)});
-        SET IDENTITY_INSERT sp_tag_groups OFF;`.execute(trx);
+      await sql`SET IDENTITY_INSERT tag_groups ON;
+        INSERT INTO tag_groups (id, nome, descricao, unidade, created_at)
+        VALUES (${g.id}, ${g.nome}, ${g.descricao}, ${g.unidade}, ${dt(g.created_at)});
+        SET IDENTITY_INSERT tag_groups OFF;`.execute(trx);
     }
     counts.grupos_tags = groups.length;
     const tv = all(`SELECT tag_group_id, value FROM sp_tag_values`);
-    await insertBatched(trx, "sp_tag_values", tv); counts.valores_tags = tv.length;
+    await insertBatched(trx, "tag_values", tv); counts.valores_tags = tv.length;
     const ptv = all(`SELECT sku, tag_group_id, value, updated_at FROM sp_product_tag_values`).map(r => ({ ...r, updated_at: dt(r.updated_at) }));
-    await insertBatched(trx, "sp_product_tag_values", ptv); counts.tags_produtos = ptv.length;
+    await insertBatched(trx, "product_tags", ptv); counts.tags_produtos = ptv.length;
     const mtg = all(`SELECT shopify_id, tag_group_id FROM sp_menu_tag_groups`);
-    await insertBatched(trx, "sp_menu_tag_groups", mtg); counts.tags_menu = mtg.length;
+    await insertBatched(trx, "menu_tag_groups", mtg); counts.tags_menu = mtg.length;
     const ptvn = all(`SELECT product_ref, tag_group_id, normalized_value, updated_at FROM sp_product_tag_values_normalized`).map(r => ({ ...r, updated_at: dt(r.updated_at) }));
-    await insertBatched(trx, "sp_product_tag_values_normalized", ptvn); counts.tags_normalizadas = ptvn.length;
-    const done = all(`SELECT supplier, sku, processed_at FROM sp_populate_tags_done`).map(r => ({ ...r, processed_at: dt(r.processed_at) }));
-    await insertBatched(trx, "sp_populate_tags_done", done); counts.tags_ia_processados = done.length;
+    await insertBatched(trx, "product_tags_normalized", ptvn); counts.tags_normalizadas = ptvn.length;
+    const done = all(`SELECT sku, MAX(processed_at) AS processed_at FROM sp_populate_tags_done GROUP BY sku`).map(r => ({ ...r, processed_at: dt(r.processed_at) }));
+    await insertBatched(trx, "ai_tagged_products", done); counts.tags_ia_processados = done.length;
 
     // ── Configuração (JSON) ──
     const sup = (f: string) => readJson(dataPath("suprides", f));
@@ -119,16 +119,16 @@ async function main() {
     counts.margens_colecoes = Object.keys(cm).length;
 
     const mp = sup("mappings.json") ?? {};
-    await insertBatched(trx, "line_mappings", (mp.suprides ?? []).map((l: any, i: number) => ({ product_line: l.product_line, active: l.active === false ? 0 : 1, menu_item: l.menuItem ?? null, position: i })));
-    await insertBatched(trx, "line_to_menu", Object.entries<any>(mp.lineToMenu ?? {}).map(([product_line, menu_target]) => ({ product_line, menu_target: String(menu_target) })));
-    await insertBatched(trx, "family_mappings", (mp.familyMappings ?? []).map((f: any, i: number) => ({ product_line: f.product_line, family: f.family, active: f.active === false ? 0 : 1, shopify_level2: f.shopifyLevel2 ?? null, shopify_level3: f.shopifyLevel3 ?? null, position: i })));
+    await insertBatched(trx, "line_mappings", (mp.suprides ?? []).map((l: any, i: number) => ({ supplier: "suprides", product_line: l.product_line, active: l.active === false ? 0 : 1, menu_item: l.menuItem ?? null, position: i })));
+    await insertBatched(trx, "line_to_menu", Object.entries<any>(mp.lineToMenu ?? {}).map(([product_line, menu_target]) => ({ supplier: "suprides", product_line, menu_target: String(menu_target) })));
+    await insertBatched(trx, "family_mappings", (mp.familyMappings ?? []).map((f: any, i: number) => ({ supplier: "suprides", product_line: f.product_line, family: f.family, active: f.active === false ? 0 : 1, shopify_level2: f.shopifyLevel2 ?? null, shopify_level3: f.shopifyLevel3 ?? null, position: i })));
     counts.linhas = (mp.suprides ?? []).length; counts.familias = (mp.familyMappings ?? []).length;
 
     const scm = sup("shopify-collection-mapping.json") ?? {};
     const cmRows: any[] = [];
     for (const level of ["menu", "familia", "subfamilia"]) {
       for (const [key, ids] of Object.entries<any>(scm[level] ?? {})) {
-        [...new Set<string>((ids ?? []).map(String))].forEach((id, i) => cmRows.push({ level, source_key: key, collection_id: id, position: i }));
+        [...new Set<string>((ids ?? []).map(String))].forEach((id, i) => cmRows.push({ supplier: "suprides", level, source_key: key, collection_id: id, position: i }));
       }
     }
     await insertBatched(trx, "collection_mapping", cmRows); counts.mapeamento_colecoes = cmRows.length;

@@ -49,13 +49,15 @@ const migrations: Record<string, Migration> = {
     },
   },
 
-  // Produtos e tags (vindos do SQLite). Nomes de tabelas iguais aos do SQLite.
+  // Produtos e tags, centralizados (todos os fornecedores nas mesmas tabelas).
+  // SKU único em toda a tabela (a Shopify também o exige); grupos de tags comuns a todos.
   // Campos 0/1 em tinyint (não bit) para o código continuar a comparar com números.
   '0002_products_and_tags': {
     async up(db: Kysely<any>) {
-      await sql`CREATE TABLE suprides_products (
+      await sql`CREATE TABLE products (
         id int IDENTITY(1,1) PRIMARY KEY,
-        sku nvarchar(64) NOT NULL CONSTRAINT uq_suprides_products_sku UNIQUE,
+        supplier nvarchar(20) NOT NULL DEFAULT 'suprides',
+        sku nvarchar(64) NOT NULL CONSTRAINT uq_products_sku UNIQUE,
         ean nvarchar(64) NULL, part_number nvarchar(128) NULL, brand nvarchar(200) NULL,
         product_line nvarchar(200) NULL, family nvarchar(200) NULL, sub_family nvarchar(200) NULL,
         name nvarchar(1000) NULL,
@@ -72,49 +74,46 @@ const migrations: Record<string, Migration> = {
         shopify_synced_at datetime2(0) NULL,
         shopify_content_hash nvarchar(100) NULL
       )`.execute(db);
-      for (const col of ['brand', 'family', 'product_line', 'shopify_node_id', 'shopify_product_id']) {
-        await sql.raw(`CREATE INDEX ix_suprides_products_${col} ON suprides_products (${col})`).execute(db);
+      for (const col of ['supplier', 'brand', 'family', 'product_line', 'shopify_node_id', 'shopify_product_id']) {
+        await sql.raw(`CREATE INDEX ix_products_${col} ON products (${col})`).execute(db);
       }
 
-      await sql`CREATE TABLE sp_tag_groups (
+      await sql`CREATE TABLE tag_groups (
         id int IDENTITY(1,1) PRIMARY KEY,
-        supplier nvarchar(20) NOT NULL DEFAULT 'suprides',
-        nome nvarchar(200) NOT NULL, descricao nvarchar(1000) NULL, unidade nvarchar(50) NULL,
-        created_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
-        CONSTRAINT uq_sp_tag_groups UNIQUE (supplier, nome)
+        nome nvarchar(200) NOT NULL CONSTRAINT uq_tag_groups_nome UNIQUE,
+        descricao nvarchar(1000) NULL, unidade nvarchar(50) NULL,
+        created_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME()
       )`.execute(db);
-      await sql`CREATE TABLE sp_tag_values (
+      await sql`CREATE TABLE tag_values (
         id int IDENTITY(1,1) PRIMARY KEY,
-        tag_group_id int NOT NULL REFERENCES sp_tag_groups(id) ON DELETE CASCADE,
+        tag_group_id int NOT NULL REFERENCES tag_groups(id) ON DELETE CASCADE,
         value nvarchar(400) NOT NULL,
-        CONSTRAINT uq_sp_tag_values UNIQUE (tag_group_id, value)
+        CONSTRAINT uq_tag_values UNIQUE (tag_group_id, value)
       )`.execute(db);
-      await sql`CREATE TABLE sp_product_tag_values (
+      await sql`CREATE TABLE product_tags (
         sku nvarchar(64) NOT NULL,
-        tag_group_id int NOT NULL REFERENCES sp_tag_groups(id) ON DELETE CASCADE,
+        tag_group_id int NOT NULL REFERENCES tag_groups(id) ON DELETE CASCADE,
         value nvarchar(400) NOT NULL,
         updated_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
-        CONSTRAINT pk_sp_product_tag_values PRIMARY KEY (sku, tag_group_id)
+        CONSTRAINT pk_product_tags PRIMARY KEY (sku, tag_group_id)
       )`.execute(db);
-      await sql`CREATE INDEX ix_sp_ptv_group ON sp_product_tag_values (tag_group_id)`.execute(db);
-      await sql`CREATE TABLE sp_menu_tag_groups (
+      await sql`CREATE INDEX ix_product_tags_group ON product_tags (tag_group_id)`.execute(db);
+      await sql`CREATE TABLE menu_tag_groups (
         shopify_id nvarchar(100) NOT NULL,
-        tag_group_id int NOT NULL REFERENCES sp_tag_groups(id) ON DELETE CASCADE,
-        CONSTRAINT pk_sp_menu_tag_groups PRIMARY KEY (shopify_id, tag_group_id)
+        tag_group_id int NOT NULL REFERENCES tag_groups(id) ON DELETE CASCADE,
+        CONSTRAINT pk_menu_tag_groups PRIMARY KEY (shopify_id, tag_group_id)
       )`.execute(db);
-      await sql`CREATE TABLE sp_product_tag_values_normalized (
+      await sql`CREATE TABLE product_tags_normalized (
         product_ref nvarchar(64) NOT NULL,
-        tag_group_id int NOT NULL REFERENCES sp_tag_groups(id) ON DELETE CASCADE,
+        tag_group_id int NOT NULL REFERENCES tag_groups(id) ON DELETE CASCADE,
         normalized_value nvarchar(400) NOT NULL,
         updated_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
-        CONSTRAINT pk_sp_ptvn PRIMARY KEY (product_ref, tag_group_id)
+        CONSTRAINT pk_product_tags_normalized PRIMARY KEY (product_ref, tag_group_id)
       )`.execute(db);
-      await sql`CREATE INDEX ix_sp_ptvn_group ON sp_product_tag_values_normalized (tag_group_id)`.execute(db);
-      await sql`CREATE TABLE sp_populate_tags_done (
-        supplier nvarchar(20) NOT NULL DEFAULT 'suprides',
-        sku nvarchar(64) NOT NULL,
-        processed_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
-        CONSTRAINT pk_sp_populate_tags_done PRIMARY KEY (supplier, sku)
+      await sql`CREATE INDEX ix_product_tags_normalized_group ON product_tags_normalized (tag_group_id)`.execute(db);
+      await sql`CREATE TABLE ai_tagged_products (
+        sku nvarchar(64) NOT NULL PRIMARY KEY,
+        processed_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME()
       )`.execute(db);
     },
   },
@@ -156,31 +155,37 @@ const migrations: Record<string, Migration> = {
       )`.execute(db);
       // mappings.json
       await sql`CREATE TABLE line_mappings (
-        product_line nvarchar(200) NOT NULL PRIMARY KEY,
+        supplier nvarchar(20) NOT NULL,
+        product_line nvarchar(200) NOT NULL,
         active tinyint NOT NULL DEFAULT 1,
         menu_item nvarchar(200) NULL,
-        position int NOT NULL DEFAULT 0
+        position int NOT NULL DEFAULT 0,
+        CONSTRAINT pk_line_mappings PRIMARY KEY (supplier, product_line)
       )`.execute(db);
       await sql`CREATE TABLE line_to_menu (
-        product_line nvarchar(200) NOT NULL PRIMARY KEY,
-        menu_target nvarchar(400) NOT NULL
+        supplier nvarchar(20) NOT NULL,
+        product_line nvarchar(200) NOT NULL,
+        menu_target nvarchar(400) NOT NULL,
+        CONSTRAINT pk_line_to_menu PRIMARY KEY (supplier, product_line)
       )`.execute(db);
       await sql`CREATE TABLE family_mappings (
+        supplier nvarchar(20) NOT NULL,
         product_line nvarchar(200) NOT NULL,
         family nvarchar(200) NOT NULL,
         active tinyint NOT NULL DEFAULT 1,
         shopify_level2 nvarchar(200) NULL,
         shopify_level3 nvarchar(200) NULL,
         position int NOT NULL DEFAULT 0,
-        CONSTRAINT pk_family_mappings PRIMARY KEY (product_line, family)
+        CONSTRAINT pk_family_mappings PRIMARY KEY (supplier, product_line, family)
       )`.execute(db);
       // shopify-collection-mapping.json: nível (menu|familia|subfamilia) + chave → coleções Shopify
       await sql`CREATE TABLE collection_mapping (
+        supplier nvarchar(20) NOT NULL,
         level nvarchar(20) NOT NULL,
         source_key nvarchar(400) NOT NULL,
         collection_id nvarchar(100) NOT NULL,
         position int NOT NULL DEFAULT 0,
-        CONSTRAINT pk_collection_mapping PRIMARY KEY (level, source_key, collection_id)
+        CONSTRAINT pk_collection_mapping PRIMARY KEY (supplier, level, source_key, collection_id)
       )`.execute(db);
       await sql`CREATE TABLE collection_mapping_hidden (
         hidden_key nvarchar(400) NOT NULL PRIMARY KEY
