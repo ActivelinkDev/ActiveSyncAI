@@ -50,7 +50,7 @@ export class DangerConfirmDialogComponent {
   close(result: boolean): void { this.dialogRef.close(result); }
 }
 
-const API = ((window as any).ENV_API_BASE?.replace(/\/+$/, '') || 'http://localhost:3004') + '/api';
+const API = '' + '/api';
 
 @Component({
   selector: 'app-preferences-dialog',
@@ -147,14 +147,34 @@ export class PreferencesDialog implements OnInit {
 
   // ===== Ligações =====
   conn = { shopifyStore: '', shopifyToken: '', shopifyLocationId: '', supridesUrl: '', supridesUser: '', supridesPass: '', supridesToken: '', openaiApiKey: '' };
+  /** As credenciais nunca vêm inteiras do servidor: só "••••abcd". Os campos ficam vazios = manter. */
+  connMask: Record<string, string> = {};
+  readonly secretFields = ['shopifyToken', 'supridesPass', 'supridesToken', 'openaiApiKey'] as const;
   connLoading = false;
   connSaving  = false;
+
+  secretPlaceholder(key: string): string {
+    const m = this.connMask[key];
+    return m ? `${m} (definido — deixar vazio para manter)` : 'não definido';
+  }
 
   loadConn(): void {
     if (this.connLoading) return;
     this.connLoading = true;
-    this.http.get<typeof this.conn>(`${API}/suprides/admin/connection`).subscribe({
-      next: (r) => { this.conn = { ...this.conn, ...r }; this.connLoading = false; },
+    this.http.get<Record<string, any>>(`${API}/suprides/admin/connection`).subscribe({
+      next: (r) => {
+        const next: any = { ...this.conn };
+        for (const k of Object.keys(this.conn)) {
+          if ((this.secretFields as readonly string[]).includes(k)) {
+            this.connMask[k] = r[`${k}Set`] ? String(r[k] || '••••') : '';
+            next[k] = '';
+          } else {
+            next[k] = r[k] ?? '';
+          }
+        }
+        this.conn = next;
+        this.connLoading = false;
+      },
       error: () => { this.connLoading = false; },
     });
   }
@@ -163,7 +183,7 @@ export class PreferencesDialog implements OnInit {
     if (this.connSaving) return;
     this.connSaving = true;
     this.http.put(`${API}/suprides/admin/connection`, this.conn).subscribe({
-      next: () => { this.connSaving = false; this.snackBar.open('Ligações guardadas ✓', 'Fechar', { duration: 2500 }); },
+      next: () => { this.connSaving = false; this.snackBar.open('Ligações guardadas ✓', 'Fechar', { duration: 2500 }); this.loadConn(); },
       error: () => { this.connSaving = false; this.snackBar.open('Erro ao guardar', 'Fechar', { duration: 3000 }); },
     });
   }

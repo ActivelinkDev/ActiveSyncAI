@@ -307,7 +307,7 @@ export class TagsService {
   // ===== AI =====
 
   private _sseObservable(url: string): Observable<any> {
-    const base = (window as any).ENV_API_BASE?.replace(/\/+$/, '') || 'http://localhost:3004';
+    const base = '';
     const absoluteUrl = url.startsWith('http') ? url : `${base}${url}`;
     return new Observable(observer => {
       const es = new EventSource(absoluteUrl);

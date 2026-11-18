@@ -25,7 +25,7 @@ interface InheritedTag    { id: number; nome: string; from: string; }
 interface FamiliaGroup    { grupo: string; familias: Familia[]; }
 interface SubfamiliaGroup { grupo: string; familia: string; subfamilias: Subfamilia[]; }
 
-const API = ((window as any).ENV_API_BASE?.replace(/\/+$/, '') || 'http://localhost:3004') + '/api';
+const API = '' + '/api';
 type ActiveTab = 'tags';
 
 interface ProdSubNode {

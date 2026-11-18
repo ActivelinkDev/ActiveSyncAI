@@ -1,4 +1,6 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { AuthService } from '../../auth/auth.service';
+import { ChangePasswordDialog } from '../../auth/change-password-dialog';
 import { RouterOutlet } from '@angular/router';
 import { CommonModule } from '@angular/common';
 
@@ -25,7 +27,7 @@ declare global {
   }
 }
 
-const API = ((window as any).ENV_API_BASE?.replace(/\/+$/, '') || 'http://localhost:3004') + '/api';
+const API = '' + '/api';
 
 @Component({
   selector: 'app-windows-shell',
@@ -35,6 +37,9 @@ const API = ((window as any).ENV_API_BASE?.replace(/\/+$/, '') || 'http://localh
   styleUrls: ['./windows-shell.scss']
 })
 export class WindowsShellComponent implements OnInit, OnDestroy {
+  readonly auth = inject(AuthService);
+  /** Botões de janela só dentro do Electron; no browser não fazem sentido. */
+  readonly isElectron = !!(window.electronWindow || window.electronAPI);
   maximized = false;
   syncing = false;
   syncDone = 0;
@@ -132,6 +137,15 @@ export class WindowsShellComponent implements OnInit, OnDestroy {
       width: '860px', maxWidth: '96vw', height: '90vh',
       panelClass: ['b2b-dialog', 'suprides-margens-dialog']
     });
+  }
+
+  openChangePassword(): void {
+    this.dialog.open(ChangePasswordDialog, { panelClass: 'glass-dialog' });
+  }
+
+  logout(): void {
+    this.dialog.closeAll();
+    this.auth.logout();
   }
 
   minimize(): void { window.electronWindow?.minimize?.(); }

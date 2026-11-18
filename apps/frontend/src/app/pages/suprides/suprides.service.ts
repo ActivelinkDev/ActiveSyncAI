@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
-const API_ROOT = ((window as any).ENV_API_BASE?.replace(/\/+$/, '') || 'http://localhost:3004') + '/api';
+const API_ROOT = '' + '/api';
 export type SupplierKey = 'suprides' | 'esprinet';
 
 export interface FamiliaTree {

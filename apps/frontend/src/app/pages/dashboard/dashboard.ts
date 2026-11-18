@@ -8,7 +8,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { Chart, registerables } from 'chart.js';
 Chart.register(...registerables);
 
-const API = ((window as any).ENV_API_BASE?.replace(/\/+$/, '') || 'http://localhost:3004') + '/api';
+const API = '' + '/api';
 
 interface DashSummary {
   totalProducts:    number;

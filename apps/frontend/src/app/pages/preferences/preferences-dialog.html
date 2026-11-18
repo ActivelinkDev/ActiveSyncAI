@@ -228,7 +228,7 @@
           </div>
           <div class="conn-field">
             <label>Access Token</label>
-            <input class="conn-input" type="password" [(ngModel)]="conn.shopifyToken" placeholder="shpat_…">
+            <input class="conn-input" type="password" [(ngModel)]="conn.shopifyToken" [placeholder]="secretPlaceholder('shopifyToken')" autocomplete="off">
           </div>
           <div class="conn-field">
             <label>Location ID</label>
@@ -246,17 +246,17 @@
           </div>
           <div class="conn-field">
             <label>Password</label>
-            <input class="conn-input" type="password" [(ngModel)]="conn.supridesPass" placeholder="••••••••">
+            <input class="conn-input" type="password" [(ngModel)]="conn.supridesPass" [placeholder]="secretPlaceholder('supridesPass')" autocomplete="off">
           </div>
           <div class="conn-field">
             <label>Token</label>
-            <input class="conn-input" type="password" [(ngModel)]="conn.supridesToken" placeholder="token…">
+            <input class="conn-input" type="password" [(ngModel)]="conn.supridesToken" [placeholder]="secretPlaceholder('supridesToken')" autocomplete="off">
           </div>
 
           <div class="conn-section-title" style="margin-top:20px">OpenAI</div>
           <div class="conn-field">
             <label>API Key</label>
-            <input class="conn-input" type="password" [(ngModel)]="conn.openaiApiKey" placeholder="sk-proj-…">
+            <input class="conn-input" type="password" [(ngModel)]="conn.openaiApiKey" [placeholder]="secretPlaceholder('openaiApiKey')" autocomplete="off">
           </div>
 
           <div class="conn-actions">

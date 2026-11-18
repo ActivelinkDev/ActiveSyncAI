@@ -11,8 +11,17 @@
     <button mat-icon-button (click)="openPreferences()" matTooltip="Definições" class="btn-settings no-drag">
       <mat-icon>settings</mat-icon>
     </button>
+    <button mat-button class="user-btn no-drag" [matMenuTriggerFor]="userMenu" aria-label="Conta">
+      <span class="user-avatar">{{ (auth.username() || '?').charAt(0).toUpperCase() }}</span>
+      <span class="user-name">{{ auth.username() }}</span>
+    </button>
+    <mat-menu #userMenu="matMenu" xPosition="before">
+      <button mat-menu-item (click)="openChangePassword()"><mat-icon>key</mat-icon>Mudar palavra-passe</button>
+      <button mat-menu-item (click)="logout()"><mat-icon>logout</mat-icon>Sair</button>
+    </mat-menu>
   </div>
 
+  @if (isElectron) {
   <div class="window-controls no-drag">
     <button class="wc-btn" (click)="minimize()" mat-icon-button aria-label="Minimizar">
       <mat-icon>remove</mat-icon>
@@ -24,6 +33,7 @@
       <mat-icon>close</mat-icon>
     </button>
   </div>
+  }
 </div>
 
 <!-- RIBBON -->
