@@ -5,7 +5,7 @@
 import type { SnapshotProduct } from '../suprides/api/shopify-read';
 import type { SyncPlanItem } from '../suprides/routes/sync';
 
-export type VerifyField = 'status' | 'price' | 'compareAtPrice' | 'cost' | 'collections' | 'exists' | 'created';
+export type VerifyField = 'status' | 'price' | 'compareAtPrice' | 'cost' | 'collections' | 'exists' | 'created' | 'published';
 
 export interface VerifyMismatch {
   sku: string;
@@ -60,6 +60,8 @@ export function verifyPlan(plan: SyncPlanItem[], after: SnapshotProduct[]): Veri
       } else {
         const expStatus = (it.status || '').toUpperCase();
         if (expStatus && p.status !== expStatus) miss(it, 'status', expStatus, p.status);
+        // Ativo mas fora da Loja online = invisível para os clientes. (Cópias antigas sem o campo não contam.)
+        if (expStatus === 'ACTIVE' && p.status === 'ACTIVE' && p.publishedAt === null) miss(it, 'published', 'publicado', 'não publicado');
 
         if (it.action === 'update' || it.action === 'create') {
           if (money(it.price) !== money(p.price)) miss(it, 'price', it.price, p.price);

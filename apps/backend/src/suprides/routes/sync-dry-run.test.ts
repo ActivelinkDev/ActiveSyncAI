@@ -143,3 +143,14 @@ test('sync:verify: loja igual ao plano → sem diferenças; preço errado → di
   const created = [...after, shop(50, 'NEW')];
   assert.equal(verifyPlan(plan, created).mismatchesByField.created, 1);
 });
+
+test('sync:verify: produto ativo não publicado na loja → diferença', async () => {
+  const r = await run();
+  const plan: SyncPlanItem[] = r.plan;
+  const it = plan.find(i => i.sku === 'UPD')!;
+  const after = SHOP.map(p => (p.sku === 'UPD'
+    ? { ...p, status: 'ACTIVE', publishedAt: null, price: it.price!, compareAtPrice: it.compareAtPrice ?? null, cost: it.cost!, collectionIds: it.collectionIds! }
+    : p));
+  const v = verifyPlan(plan.filter(i => i.sku === 'UPD'), after);
+  assert.deepEqual(v.mismatches.map(m => m.field), ['published']);
+});

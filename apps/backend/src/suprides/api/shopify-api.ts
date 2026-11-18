@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { loadConnectionSettings } from '../repositories/store';
 import { gql, makeGraphqlClient, SHOPIFY_API_VERSION } from './shopify-read';
 
@@ -66,30 +65,43 @@ export async function variantUpdate(productId: number, variantId: number, input:
   throwUserErrors(`productVariantsBulkUpdate(${productId})`, data?.productVariantsBulkUpdate);
 }
 
-/**
- * Publica o produto na Loja online. O token não tem write_publications, por isso usa-se
- * o REST (published_at) — a única chamada REST que resta. Quando a app tiver o scope,
- * trocar por publishablePublish.
- */
-export async function publishProduct(productId: number): Promise<void> {
-  const conn = loadConnectionSettings();
-  const store = conn.shopifyStore || process.env.SHOPIFY_STORE || '';
-  const token = conn.shopifyToken || process.env.SHOPIFY_PASSWORD || '';
-  for (let i = 0; i < 5; i++) {
-    const res = await axios.put(
-      `https://${store}/admin/api/${SHOPIFY_API_VERSION}/products/${productId}.json`,
-      { product: { id: productId, published_at: new Date().toISOString() } },
-      { headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' }, timeout: 20_000, validateStatus: () => true },
-    ).catch(e => ({ status: 0, data: e?.message, headers: {} as any }));
-    if (res.status >= 200 && res.status < 300) return;
-    if (res.status === 429 || res.status === 0 || res.status >= 500) {
-      const ra = Number((res.headers as any)?.['retry-after'] || 2);
-      await sleep((isNaN(ra) ? 2 : ra) * 1000 * (i + 1));
-      continue;
-    }
-    throw new Error(`publishProduct(${productId}) falhou (${res.status}): ${JSON.stringify(res.data).slice(0, 300)}`);
+let _onlineStorePublicationId: Promise<string> | null = null;
+
+/** ID da publicação "Online Store" (lido uma vez por processo). */
+function onlineStorePublicationId(): Promise<string> {
+  if (!_onlineStorePublicationId) {
+    const p = graphql('{ publications(first: 50) { nodes { id name } } }').then((d: any) => {
+      const nodes: { id: string; name: string }[] = d?.publications?.nodes || [];
+      const found = nodes.find(n => /online store|loja online/i.test(n.name));
+      if (!found) throw new Error('Publicação "Online Store" não encontrada');
+      return found.id;
+    });
+    p.catch(() => { _onlineStorePublicationId = null; });
+    _onlineStorePublicationId = p;
   }
-  throw new Error(`publishProduct(${productId}) falhou após 5 tentativas`);
+  return _onlineStorePublicationId;
+}
+
+async function setPublished(productId: number, publish: boolean): Promise<void> {
+  const publicationId = await onlineStorePublicationId();
+  const name = publish ? 'publishablePublish' : 'publishableUnpublish';
+  const data = await graphql(
+    `mutation($id: ID!, $input: [PublicationInput!]!) {
+      ${name}(id: $id, input: $input) { userErrors { field message } }
+    }`,
+    { id: gid('Product', productId), input: [{ publicationId }] },
+  );
+  throwUserErrors(`${name}(${productId})`, data?.[name]);
+}
+
+/** Publica o produto na Loja online. */
+export async function publishProduct(productId: number): Promise<void> {
+  await setPublished(productId, true);
+}
+
+/** Retira o produto da Loja online. */
+export async function unpublishProduct(productId: number): Promise<void> {
+  await setPublished(productId, false);
 }
 
 export interface CreateProductInput {
