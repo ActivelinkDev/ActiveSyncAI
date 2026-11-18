@@ -16,7 +16,9 @@
     "auth:set-password": "ts-node --transpile-only src/scripts/auth-set-password.ts",
     "secrets:init": "ts-node --transpile-only src/scripts/secrets-init.ts",
     "alert:test": "ts-node --transpile-only src/scripts/alert-test.ts",
-    "db:check": "ts-node --transpile-only src/scripts/db-check.ts"
+    "db:check": "ts-node --transpile-only src/scripts/db-check.ts",
+    "db:migrate": "ts-node --transpile-only src/scripts/db-migrate.ts",
+    "prices:seed": "ts-node --transpile-only src/scripts/prices-seed.ts"
   },
   "description": "MEGADIGITAL API Server",
   "author": "Pedro Azevedo / Activelink",

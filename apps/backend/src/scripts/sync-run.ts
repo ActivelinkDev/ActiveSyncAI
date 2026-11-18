@@ -16,6 +16,7 @@ import { runFullShopifySync } from "../suprides/routes/sync";
 import { takeSnapshot } from "../services/shopify-snapshot";
 import { verifyPlan } from "../services/sync-verify";
 import { sendAlert } from "../services/alerts";
+import { recordShopPrices } from "../services/price-history";
 import { dataPath } from "../utils/data-dir";
 
 const ts = () => new Date().toLocaleString("pt-PT");
@@ -71,6 +72,15 @@ Primeiros erros:
   console.log(`${ts()} — a tirar cópia da loja depois do sync…`);
   const after = await takeSnapshot({ reason: "depois do sync" });
   console.log(`${ts()} — cópia: ${path.basename(after.file)}`);
+  try {
+    const ph = await recordShopPrices(after.snapshot.products, new Date(after.snapshot.takenAt), "SYNC");
+    console.log(ph.skipped ? `Histórico de preços: não gravado (${ph.skipped})` : `Histórico de preços: ${ph.changes} mudança(s) registada(s)`);
+  } catch (e: any) {
+    console.error("Histórico de preços FALHOU:", e?.message ?? e);
+    await sendAlert("price-history", "Histórico de preços não foi gravado", `Sync manual: não foi possível registar os preços no SQL Server.
+
+Erro: ${e?.message ?? e}`);
+  }
 
   const planFile = latestPlan();
   if (!planFile) { console.log("Sem plano gravado — verificação saltada."); return; }
