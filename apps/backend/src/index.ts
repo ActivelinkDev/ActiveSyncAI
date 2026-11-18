@@ -12,7 +12,7 @@ import supridesRouter from "./suprides/index";
 import { ensureSupridesTable, ensureSupridesTagTables } from "./db/migrate-suprides";
 import { schedulerRouter, startScheduler } from "./services/scheduler";
 import { DATA_ROOT } from "./utils/data-dir";
-import { parseSubnets, ipFilter, isLoopback } from "./security/ip-filter";
+import { effectiveSubnets, ipFilter, isLoopback } from "./security/ip-filter";
 import { audit } from "./security/audit";
 import {
   configureSecurity, securityHeaders, requireSession, requireSameOrigin,
@@ -37,7 +37,7 @@ if (!tls && !isLoopback(HOST) && HOST !== "localhost") {
   console.error(`[segurança] Sem HTTPS configurado (TLS_PFX ou TLS_CERT/TLS_KEY), o backend só pode escutar no próprio PC. HOST=${HOST} recusado.`);
   process.exit(1);
 }
-const subnets = parseSubnets(process.env.ALLOWED_SUBNETS);
+const { subnets, source: subnetSource } = effectiveSubnets(process.env.ALLOWED_SUBNETS);
 configureSecurity({ secureCookies: !!tls });
 
 const app = express();
@@ -94,7 +94,7 @@ server.requestTimeout = 0; // SSE de longa duração
 server.listen(PORT, HOST, () => {
   console.log(`Backend ON : ${tls ? "https" : "http"}://${HOST}:${PORT}`);
   console.log(`Dados em   : ${DATA_ROOT}`);
-  console.log(`Acesso     : ${subnets.length ? `${subnets.length} sub-rede(s) + este PC` : "só este PC (ALLOWED_SUBNETS vazio)"}`);
+  console.log(`Acesso     : ${subnetSource === "config" ? `${subnets.length} sub-rede(s) configurada(s) + este PC` : "redes internas (10.x, 172.16-31.x, 192.168.x) + este PC"}`);
   if (!loadAccount()) console.warn("[segurança] Conta não configurada — correr: npm run auth:set-password");
 
   try {

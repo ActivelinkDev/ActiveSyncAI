@@ -20,10 +20,18 @@ test('filtro IP: sub-redes IPv4, IPv4 em IPv6, loopback e fora', () => {
   assert.equal(ipAllowed('lixo', s), false);
 });
 
-test('filtro IP: sem sub-redes → só o próprio PC', () => {
-  const s = parseSubnets('');
-  assert.equal(ipAllowed('198.51.100.2', s), false);
-  assert.equal(ipAllowed('::ffff:127.0.0.1', s), true);
+test('filtro IP: sem configuração → só redes internas e o próprio PC', async () => {
+  const { effectiveSubnets } = await import('./ip-filter');
+  const { subnets, source } = effectiveSubnets('');
+  assert.equal(source, 'private');
+  assert.equal(ipAllowed('10.20.30.40', subnets), true);       // check-secrets: ignore
+  assert.equal(ipAllowed('172.20.1.1', subnets), true);        // check-secrets: ignore
+  assert.equal(ipAllowed('::ffff:192.168.5.9', subnets), true); // check-secrets: ignore
+  assert.equal(ipAllowed('172.32.0.1', subnets), false);       // fora de 172.16/12
+  assert.equal(ipAllowed('198.51.100.2', subnets), false);     // internet
+  assert.equal(ipAllowed('8.8.8.8', subnets), false);
+  assert.equal(ipAllowed('::ffff:127.0.0.1', subnets), true);
+  assert.equal(effectiveSubnets('203.0.113.0/24').source, 'config');
 });
 
 test('filtro IP: IPv6 e máscaras inválidas', () => {

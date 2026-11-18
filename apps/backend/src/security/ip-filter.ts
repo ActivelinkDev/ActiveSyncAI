@@ -3,7 +3,8 @@
  * CF-Connecting-IP, Origin ou User-Agent NÃO contam: qualquer cliente os falsifica.
  *
  * ALLOWED_SUBNETS no .env, separados por vírgula: "192.0.2.0/24, 198.51.100.0/24, 203.0.113.5".
- * Sem nada configurado → só o próprio servidor (loopback). Falha fechada.
+ * Sem nada configurado → só redes internas (gamas privadas RFC 1918 + IPv6 local) e o próprio
+ * servidor. A internet nunca entra. Para restringir mais, definir ALLOWED_SUBNETS.
  */
 import net from 'net';
 import type { Request, Response, NextFunction } from 'express';
@@ -42,6 +43,16 @@ export function normalizeRemote(addr: string | undefined): string {
   const a = String(addr || '').trim();
   const m = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(a);
   return m ? m[1] : a;
+}
+
+/** Redes internas: 10/8, 172.16/12, 192.168/16, IPv6 ULA (fc00::/7) e link-local (fe80::/10). */
+export const PRIVATE_NETWORKS = '10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, fe80::/10'; // check-secrets: ignore (gamas RFC 1918, não são IPs da empresa)
+
+/** Sub-redes efetivas: ALLOWED_SUBNETS se definido, senão as redes internas. */
+export function effectiveSubnets(spec: string | undefined): { subnets: Subnet[]; source: 'config' | 'private' } {
+  return String(spec || '').trim()
+    ? { subnets: parseSubnets(spec), source: 'config' }
+    : { subnets: parseSubnets(PRIVATE_NETWORKS), source: 'private' };
 }
 
 export function parseSubnets(spec: string | undefined): Subnet[] {
