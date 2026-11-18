@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Margins, Mappings, AdminSettings, ConnectionSettings, SyncStats, ShopifyCollectionMapping, MenuItemsFile, MenuNode, CollectionMargins, PublicMenuFile, PublicMenuStats } from '../types';
 import { dataPath } from '../../utils/data-dir';
+import { encryptFields, decryptFields } from '../../security/secret-box';
 
 const DATA_DIR = dataPath('suprides');
 
@@ -53,10 +54,12 @@ export function saveAdminSettings(data: AdminSettings): void { write('admin-sett
 
 // ----- Connection Settings -----
 export function loadConnectionSettings(): ConnectionSettings {
-  return read<ConnectionSettings>('connection-settings.json', {});
+  return decryptFields(read<ConnectionSettings>('connection-settings.json', {}));
 }
 export function saveConnectionSettings(data: ConnectionSettings): void {
-  write('connection-settings.json', data);
+  write('connection-settings.json', encryptFields(data));
+  // A cópia .bak teria a versão anterior (possivelmente em claro).
+  try { fs.rmSync(path.join(DATA_DIR, 'connection-settings.json.bak'), { force: true }); } catch { /* ignora */ }
 }
 
 // ----- Shopify Collection Mapping -----

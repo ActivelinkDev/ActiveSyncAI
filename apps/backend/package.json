@@ -13,7 +13,9 @@
     "test": "node --require ts-node/register/transpile-only --test \"src/**/*.test.ts\"",
     "sync:run": "ts-node --transpile-only src/scripts/sync-run.ts",
     "images:run": "ts-node --transpile-only src/scripts/images-run.ts",
-    "images:dedupe": "ts-node --transpile-only src/scripts/images-dedupe.ts"
+    "images:dedupe": "ts-node --transpile-only src/scripts/images-dedupe.ts",
+    "auth:set-password": "ts-node --transpile-only src/scripts/auth-set-password.ts",
+    "secrets:init": "ts-node --transpile-only src/scripts/secrets-init.ts"
   },
   "description": "MEGADIGITAL API Server",
   "author": "Pedro Azevedo / Activelink",
@@ -21,7 +23,6 @@
   "dependencies": {
     "axios": "^1.16.0",
     "better-sqlite3": "^12.10.0",
-    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^5.1.0",
     "morgan": "^1.10.1",
@@ -33,7 +34,6 @@
   "devDependencies": {
     "@types/basic-auth": "^1.1.8",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/morgan": "^1.9.10",
     "@types/multer": "^2.0.0",
