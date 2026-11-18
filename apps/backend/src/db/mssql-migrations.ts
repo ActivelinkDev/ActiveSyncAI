@@ -239,28 +239,47 @@ const migrations: Record<string, Migration> = {
       await sql`CREATE INDEX ix_security_audit_ts ON security_audit (ts)`.execute(db);
     },
   },
+  '0005_config_import_details': {
+    async up(db: Kysely<any>) {
+      await sql`ALTER TABLE sync_history ALTER COLUMN ran_at datetime2(3) NOT NULL`.execute(db);
+      await sql`ALTER TABLE sync_latest_products ALTER COLUMN synced_at datetime2(3) NULL`.execute(db);
+      await sql`ALTER TABLE collection_mapping ADD source_position int NULL`.execute(db);
+    },
+  },
+  '0006_sync_precision_and_order': {
+    async up(db: Kysely<any>) {
+      await sql`ALTER TABLE app_account ALTER COLUMN changed_at datetime2(3) NOT NULL`.execute(db);
+      await sql`ALTER TABLE products ALTER COLUMN shopify_synced_at datetime2(3) NULL`.execute(db);
+      await sql`IF COL_LENGTH('line_to_menu', 'position') IS NULL ALTER TABLE line_to_menu ADD position int NULL`.execute(db);
+      await sql`IF COL_LENGTH('collection_margins', 'position') IS NULL ALTER TABLE collection_margins ADD position int NULL`.execute(db);
+    },
+  },
 };
 
 /**
  * Registo próprio (tabela schema_migrations), em vez do Migrator do Kysely: o bloqueio dele
  * (sp_getapplock com @DbPrincipal = 'dbo') exige db_owner, e o utilizador da app só tem
- * datareader/datawriter/ddladmin. Cada migração corre numa transação.
+ * datareader/datawriter/ddladmin. O bloqueio em public serializa dois arranques na mesma BD.
  */
 export async function migrateMssql(db: Kysely<any> = getMssql()): Promise<{ applied: string[] }> {
-  await sql`IF OBJECT_ID('schema_migrations', 'U') IS NULL
-    CREATE TABLE schema_migrations (
-      name nvarchar(200) NOT NULL PRIMARY KEY,
-      applied_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME()
-    )`.execute(db);
-  const done = new Set((await db.selectFrom('schema_migrations').select('name').execute()).map((r: any) => r.name));
-  const applied: string[] = [];
-  for (const name of Object.keys(migrations).sort()) {
-    if (done.has(name)) continue;
-    await db.transaction().execute(async trx => {
+  return db.transaction().execute(async trx => {
+    await sql`DECLARE @result int;
+      EXEC @result = sys.sp_getapplock @Resource = N'ActiveSyncAI:schema_migrations',
+        @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 60000, @DbPrincipal = 'public';
+      IF @result < 0 THROW 51000, 'Não foi possível obter o bloqueio das migrações.', 1;`.execute(trx);
+    await sql`IF OBJECT_ID('schema_migrations', 'U') IS NULL
+      CREATE TABLE schema_migrations (
+        name nvarchar(200) NOT NULL PRIMARY KEY,
+        applied_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME()
+      )`.execute(trx);
+    const done = new Set((await trx.selectFrom('schema_migrations').select('name').execute()).map(r => r.name));
+    const applied: string[] = [];
+    for (const name of Object.keys(migrations).sort()) {
+      if (done.has(name)) continue;
       await migrations[name].up(trx);
       await trx.insertInto('schema_migrations').values({ name }).execute();
-    });
-    applied.push(name);
-  }
-  return { applied };
+      applied.push(name);
+    }
+    return { applied };
+  });
 }

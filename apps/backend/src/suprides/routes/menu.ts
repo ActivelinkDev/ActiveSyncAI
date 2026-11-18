@@ -17,7 +17,7 @@ function nodesToMenuResponse(nodes: MenuNode[]) {
 }
 
 router.get('/', async (_req, res) => {
-  const savedNodes = loadMenuItems();
+  const savedNodes = await loadMenuItems();
   if (savedNodes.length > 0) return res.json(nodesToMenuResponse(savedNodes));
 
   try {
@@ -28,19 +28,19 @@ router.get('/', async (_req, res) => {
   }
 });
 
-router.get('/nodes', (_req, res) => {
-  res.json(loadMenuItems());
+router.get('/nodes', async (_req, res) => {
+  res.json(await loadMenuItems());
 });
 
-router.put('/', (req, res) => {
+router.put('/', async (req, res) => {
   const { nodes } = req.body as { nodes: MenuNode[] };
   if (!Array.isArray(nodes)) return res.status(400).json({ error: 'nodes deve ser um array' });
-  res.json({ nodes: saveMenuItems(nodes) });
+  res.json({ nodes: await saveMenuItems(nodes) });
 });
 
 router.post('/resolve-ids', async (_req, res) => {
   try {
-    const nodes = loadMenuItems();
+    const nodes = await loadMenuItems();
     if (nodes.length === 0) return res.json({ resolved: 0 });
 
     // Fetch all current Shopify collections (handle → gid)
@@ -63,7 +63,7 @@ router.post('/resolve-ids', async (_req, res) => {
       }
     };
     walk(nodes);
-    saveMenuItems(nodes);
+    await saveMenuItems(nodes);
 
     // Build lookup maps from resolved tree
     const titleToId  = new Map<string, string>(); // title → shopifyId
@@ -89,11 +89,11 @@ router.post('/resolve-ids', async (_req, res) => {
     };
     indexTitles(nodes);
 
-    // Migrate shopify-collection-mapping.json:
+    // Migrate collection mappings:
     //  - Numeric keys that exist in current menu → keep as-is
     //  - Numeric keys that are stale (not in menu) → try to find new ID via titleToId
     //  - Text keys (collection titles) → convert to numeric ID via titleToId
-    const mapping = loadShopifyCollectionMapping();
+    const mapping = await loadShopifyCollectionMapping();
     let migratedKeys = 0;
 
     const migrateSection = (section: Record<string, string[]>): Record<string, string[]> => {
@@ -144,13 +144,13 @@ router.post('/resolve-ids', async (_req, res) => {
     mapping.familia    = migrateSection(mapping.familia    || {});
     mapping.subfamilia = migrateSection(mapping.subfamilia || {});
     if (mapping.hidden) mapping.hidden = migrateHidden(mapping.hidden);
-    saveShopifyCollectionMapping(mapping);
+    await saveShopifyCollectionMapping(mapping);
 
-    // Migrar collection-margins.json:
+    // Migrar margens por coleção:
     //  1. Chaves cujo ID já existe no menu actual → manter (actualizar _title)
     //  2. Chaves cujo ID não existe mas têm _title que resolve para um novo ID → remapear
     //  3. Chaves sem _title e ID desconhecido → manter (orphaned, não eliminamos)
-    const collMargins = loadCollectionMargins();
+    const collMargins = await loadCollectionMargins();
     let migratedMargins = 0;
     const newRules: typeof collMargins.rules = {};
 
@@ -171,7 +171,7 @@ router.post('/resolve-ids', async (_req, res) => {
     }
 
     collMargins.rules = newRules;
-    saveCollectionMargins(collMargins);
+    await saveCollectionMargins(collMargins);
 
     res.json({ resolved, migratedKeys, migratedMargins, total: nodes.length });
   } catch (e: any) {
@@ -196,11 +196,11 @@ router.post('/sync', async (req, res) => {
       s + 1 + (l.children || []).reduce((s2: number, f: any) => s2 + 1 + (f.children || []).length, 0), 0);
     send('start', { total });
 
-    saveMenuItems(nodes);
+    await saveMenuItems(nodes);
     const result = await syncMenuStructure(nodes, (phase, done, total) => {
       send('progress', { phase, done, total });
     });
-    saveMenuItems(nodes as any);
+    await saveMenuItems(nodes as any);
     send('done', result);
   } catch (e: any) {
     console.error('[MENU SYNC] Erro:', e.message);

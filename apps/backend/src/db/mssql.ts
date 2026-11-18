@@ -7,8 +7,6 @@
  *   MSSQL_DATABASE=ActiveSyncAI        MSSQL_USER / MSSQL_PASSWORD (login SQL só desta BD)
  *   MSSQL_ENCRYPT=1 (por omissão)      MSSQL_TRUST_CERT=1 (certificado autoassinado da instância)
  *
- * Kysely constrói o SQL (com tipos) e serve tanto SQLite como SQL Server, o que permite
- * migrar módulo a módulo.
  */
 import { Kysely, MssqlDialect } from 'kysely';
 import * as Tedious from 'tedious';

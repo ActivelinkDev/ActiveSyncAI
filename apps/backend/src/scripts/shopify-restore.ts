@@ -10,6 +10,8 @@
  * Nunca apaga produtos nem volta a acrescentar coleções.
  */
 import "dotenv/config";
+import { withConnectionSettings } from "../suprides/repositories/store";
+import { closeMssql } from "../db/mssql";
 import { loadSnapshot } from "../services/shopify-snapshot";
 import { diffSnapshot, applyRestore } from "../services/shopify-restore";
 import { readAllProducts } from "../suprides/api/shopify-read";
@@ -76,4 +78,4 @@ async function main() {
   if (r.errors.length) process.exit(1);
 }
 
-main().catch(e => { console.error("\nERRO:", e?.response?.data ?? e?.message ?? e); process.exit(1); });
+withConnectionSettings(main).catch(e => { console.error("\nERRO:", e?.response?.data ?? e?.message ?? e); process.exitCode = 1; }).finally(closeMssql);

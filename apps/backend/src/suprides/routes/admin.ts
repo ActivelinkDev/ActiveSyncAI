@@ -6,8 +6,8 @@ import { clientIp } from '../../security/ip-filter';
 
 const router = Router();
 
-router.get('/settings', (_req, res) => {
-  res.json(loadAdminSettings());
+router.get('/settings', async (_req, res) => {
+  res.json(await loadAdminSettings());
 });
 
 /** Só os campos conhecidos (nada de chaves arbitrárias vindas do pedido). */
@@ -22,18 +22,18 @@ export function pickAdminSettings(body: any): Partial<import('../types').AdminSe
   return out;
 }
 
-router.put('/settings', (req, res) => {
-  const updated = { ...loadAdminSettings(), ...pickAdminSettings(req.body) };
-  saveAdminSettings(updated);
+router.put('/settings', async (req, res) => {
+  const updated = { ...await loadAdminSettings(), ...pickAdminSettings(req.body) };
+  await saveAdminSettings(updated);
   res.json(updated);
 });
 
-router.get('/sync-stats', (_req, res) => {
-  res.json(loadStats());
+router.get('/sync-stats', async (_req, res) => {
+  res.json(await loadStats());
 });
 
-router.post('/sync-stats/reset', (_req, res) => {
-  res.json(resetStats());
+router.post('/sync-stats/reset', async (_req, res) => {
+  res.json(await resetStats());
 });
 
 const CONNECTION_FIELDS: FieldSpec[] = [
@@ -47,24 +47,24 @@ const CONNECTION_FIELDS: FieldSpec[] = [
   { key: 'openaiApiKey', env: 'OPENAI_API_KEY' },
 ];
 
-router.get('/connection', (_req, res) => {
-  res.json(connectionView(CONNECTION_FIELDS, loadConnectionSettings()));
+router.get('/connection', async (_req, res) => {
+  res.json(connectionView(CONNECTION_FIELDS, await loadConnectionSettings()));
 });
 
-router.put('/connection', (req, res) => {
-  const { updated, changed } = applyConnectionUpdate(CONNECTION_FIELDS, loadConnectionSettings(), req.body);
-  if (changed.length) saveConnectionSettings(updated);
-  audit('action', { ip: clientIp(req), user: req.session?.username, detail: `Ligações Suprides alteradas: ${changed.join(', ') || 'nada'}` });
+router.put('/connection', async (req, res) => {
+  const { updated, changed } = applyConnectionUpdate(CONNECTION_FIELDS, await loadConnectionSettings(), req.body);
+  if (changed.length) await saveConnectionSettings(updated);
+  await audit('action', { ip: clientIp(req), user: req.session?.username, detail: `Ligações Suprides alteradas: ${changed.join(', ') || 'nada'}` });
   res.json({ ok: true, changed });
 });
 
-router.get('/custom-prompt', (_req, res) => {
-  res.json({ instructions: loadCustomPrompt() });
+router.get('/custom-prompt', async (_req, res) => {
+  res.json({ instructions: await loadCustomPrompt() });
 });
 
-router.post('/custom-prompt', (req, res) => {
+router.post('/custom-prompt', async (req, res) => {
   const instructions = typeof req.body?.instructions === 'string' ? req.body.instructions : '';
-  saveCustomPrompt(instructions);
+  await saveCustomPrompt(instructions);
   res.json({ ok: true });
 });
 

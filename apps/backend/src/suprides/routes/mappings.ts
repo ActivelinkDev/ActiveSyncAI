@@ -4,12 +4,12 @@ import { getMenuTopItems } from '../api/shopify-api';
 
 const router = Router();
 
-router.get('/', (_req, res) => {
-  res.json(loadMappings());
+router.get('/', async (_req, res) => {
+  res.json(await loadMappings());
 });
 
-router.put('/', (req, res) => {
-  const current = loadMappings();
+router.put('/', async (req, res) => {
+  const current = await loadMappings();
   const merged  = { ...current, ...req.body };
   const currentCount = (current.suprides?.length || 0) + Object.keys(current.lineToMenu || {}).length + (current.familyMappings?.length || 0);
   const incomingCount = (merged.suprides?.length || 0) + Object.keys(merged.lineToMenu || {}).length + (merged.familyMappings?.length || 0);
@@ -19,7 +19,7 @@ router.put('/', (req, res) => {
       detail: 'O payload recebido limparia todos os mapeamentos. Usa ?force=true apenas se for intencional.',
     });
   }
-  saveMappings(merged);
+  await saveMappings(merged);
   res.json(merged);
 });
 

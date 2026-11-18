@@ -46,16 +46,16 @@ export interface SnapshotProduct {
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-export function shopifyStoreAndToken(): { store: string; token: string } {
-  const s = loadConnectionSettings();
+export async function shopifyStoreAndToken(): Promise<{ store: string; token: string }> {
+  const s = await loadConnectionSettings();
   const store = s.shopifyStore || process.env.SHOPIFY_STORE || '';
   const token = s.shopifyToken || process.env.SHOPIFY_PASSWORD || '';
   if (!store || !token) throw new Error('Credenciais Shopify em falta');
   return { store, token };
 }
 
-export function makeGraphqlClient(version = SHOPIFY_READ_API_VERSION): AxiosInstance {
-  const { store, token } = shopifyStoreAndToken();
+export async function makeGraphqlClient(version = SHOPIFY_READ_API_VERSION): Promise<AxiosInstance> {
+  const { store, token } = await shopifyStoreAndToken();
   return axios.create({
     baseURL: `https://${store}/admin/api/${version}/graphql.json`,
     headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
@@ -102,7 +102,7 @@ export async function gql<T = any>(http: AxiosInstance, query: string, variables
  * Lê todos os produtos da loja (ou só os que correspondem à pesquisa `search`, p.ex. "sku:A OR sku:B").
  */
 export async function readAllProducts(onProgress?: (n: number) => void, search?: string): Promise<SnapshotProduct[]> {
-  const http = makeGraphqlClient();
+  const http = await makeGraphqlClient();
   const products: SnapshotProduct[] = [];
   let after: string | null = null;
   for (;;) {

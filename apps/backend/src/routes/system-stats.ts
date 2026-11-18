@@ -65,10 +65,10 @@ export default router;
 // GET /api/system/info — dados de configuração que a interface mostra (sem segredos).
 export const systemInfoRouter = Router();
 
-systemInfoRouter.get("/", (_req, res) => {
+systemInfoRouter.get("/", async (_req, res) => {
   const sched = getSchedulerConfig();
   res.json({
-    shopifyStore: getShopifyStore(),
+    shopifyStore: await getShopifyStore(),
     apiVersion: SHOPIFY_API_VERSION,
     autoSync: sched,
   });

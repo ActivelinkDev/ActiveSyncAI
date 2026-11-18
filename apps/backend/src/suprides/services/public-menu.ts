@@ -28,11 +28,11 @@ function filterNode(node: MenuNode, activeIds: Set<string>): MenuNode | null {
 
 /**
  * Constrói a árvore de menu público a partir dos IDs de coleções com produtos ativos,
- * guarda em public-menu-items.json e devolve o ficheiro gerado.
+ * guarda a árvore e as estatísticas no SQL Server.
  */
-export function buildPublicMenuTree(activeCollectionIds: string[]): PublicMenuFile {
+export async function buildPublicMenuTree(activeCollectionIds: string[]): Promise<PublicMenuFile> {
   const activeIds = new Set(activeCollectionIds);
-  const sourceNodes = loadMenuItems();
+  const sourceNodes = await loadMenuItems();
   const sourceCount = countNodes(sourceNodes);
 
   const publicNodes = sourceNodes
@@ -50,7 +50,7 @@ export function buildPublicMenuTree(activeCollectionIds: string[]): PublicMenuFi
   };
 
   const file: PublicMenuFile = { nodes: publicNodes, stats };
-  savePublicMenu(file);
+  await savePublicMenu(file);
   return file;
 }
 
@@ -63,7 +63,7 @@ export async function publishPublicMenu(
   title = 'Menu Público'
 ): Promise<{ ok: boolean; errors: string[]; warnings: string[] }> {
   const warnings: string[] = [];
-  const file = loadPublicMenu();
+  const file = await loadPublicMenu();
 
   if (!file.nodes || file.nodes.length === 0) {
     warnings.push('Nenhum nó público gerado ainda. Execute buildPublicMenuTree primeiro.');

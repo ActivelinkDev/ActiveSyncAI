@@ -38,7 +38,7 @@ export function pruneSnapshots(keep = SNAPSHOT_KEEP, dir = snapshotsDir()): stri
 }
 
 export async function takeSnapshot(opts: { reason?: string; onProgress?: (n: number) => void } = {}): Promise<{ file: string; snapshot: SnapshotFile }> {
-  const { store } = shopifyStoreAndToken();
+  const { store } = await shopifyStoreAndToken();
   const products = await readAllProducts(opts.onProgress);
   const snapshot: SnapshotFile = {
     takenAt: new Date().toISOString(),

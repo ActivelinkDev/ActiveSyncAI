@@ -2,8 +2,8 @@ import axios from 'axios';
 import type { SupridesProduct } from '../types';
 import { loadConnectionSettings } from '../repositories/store';
 
-function getSupridesCredentials() {
-  const s = loadConnectionSettings();
+async function getSupridesCredentials() {
+  const s = await loadConnectionSettings();
   return {
     url:   s.supridesUrl   || process.env.SUPRIDES_URL   || '',
     user:  s.supridesUser  || process.env.SUPRIDES_USER  || '',
@@ -18,7 +18,7 @@ export async function getProducts(
   ean?: string,
   name?: string
 ): Promise<SupridesProduct[]> {
-  const { url: SUPRIDES_URL, user: SUPRIDES_USER, pass: SUPRIDES_PASS, token: SUPRIDES_TOKEN } = getSupridesCredentials();
+  const { url: SUPRIDES_URL, user: SUPRIDES_USER, pass: SUPRIDES_PASS, token: SUPRIDES_TOKEN } = await getSupridesCredentials();
   const params: Record<string, unknown> = { user: SUPRIDES_USER, password: SUPRIDES_PASS, page, limit };
   if (ean)  params.EAN  = ean;
   if (name) params.name = name;

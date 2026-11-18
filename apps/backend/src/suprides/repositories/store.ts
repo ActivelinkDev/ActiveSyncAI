@@ -1,162 +1,300 @@
-import fs from 'fs';
-import path from 'path';
-import type { Margins, Mappings, AdminSettings, ConnectionSettings, SyncStats, ShopifyCollectionMapping, MenuItemsFile, MenuNode, CollectionMargins, PublicMenuFile, PublicMenuStats } from '../types';
-import { dataPath } from '../../utils/data-dir';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import type { Kysely } from 'kysely';
+import { getMssql } from '../../db/mssql';
+import { loadAppState, saveAppState } from '../../db/app-state';
 import { encryptFields, decryptFields } from '../../security/secret-box';
+import type {
+  Mappings, AdminSettings, ConnectionSettings, SyncStats, ShopifyCollectionMapping,
+  MenuNode, CollectionMargins, PublicMenuFile, PublicMenuStats,
+} from '../types';
 
-const DATA_DIR = dataPath('suprides');
+const supplier = 'suprides';
+const levels = ['menu', 'familia', 'subfamilia'] as const;
+type Db = Kysely<any>;
+type Row = Record<string, any>;
 
-function ensureDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+function transaction<T>(fn: (db: Db) => Promise<T>): Promise<T> {
+  return getMssql().transaction().setIsolationLevel('serializable').execute(fn);
 }
 
-function read<T>(file: string, def: T): T {
-  try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR, file), 'utf8')); }
-  catch { return def; }
+async function insertRows(db: Db, table: string, rows: Row[]): Promise<void> {
+  if (!rows.length) return;
+  const batchSize = Math.min(1000, Math.floor(2000 / Object.keys(rows[0]).length));
+  for (let i = 0; i < rows.length; i += batchSize) {
+    await db.insertInto(table).values(rows.slice(i, i + batchSize)).execute();
+  }
 }
 
-function write(file: string, data: unknown): void {
-  ensureDir();
-  const target = path.join(DATA_DIR, file);
-  const tmp = `${target}.tmp`;
-  const backup = `${target}.bak`;
-  if (fs.existsSync(target)) fs.copyFileSync(target, backup);
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, target);
+export async function loadCollectionMargins(): Promise<CollectionMargins> {
+  const rows = await getMssql().selectFrom('collection_margins').selectAll().orderBy('position').orderBy('collection_id').execute();
+  return { rules: Object.fromEntries(rows.map(r => [r.collection_id, {
+    mode: r.mode, marginValue: r.margin_value, ...(r.title == null ? {} : { _title: r.title }),
+  }])) };
 }
 
-// ----- Margins -----
-export function loadMargins(): Margins {
-  return read<Margins>('margins.json', { linePricingRules: [], familyPricingRules: [], pricingRules: [] });
-}
-export function saveMargins(data: Margins): void { write('margins.json', data); }
-
-// ----- Collection Margins -----
-export function loadCollectionMargins(): CollectionMargins {
-  return read<CollectionMargins>('collection-margins.json', { rules: {} });
-}
-export function saveCollectionMargins(data: CollectionMargins): void { write('collection-margins.json', data); }
-
-// ----- Mappings -----
-export function loadMappings(): Mappings {
-  return read<Mappings>('mappings.json', { suprides: [], lineToMenu: {}, familyMappings: [] });
-}
-export function saveMappings(data: Mappings): void { write('mappings.json', data); }
-
-// ----- Admin Settings -----
-export function loadAdminSettings(): AdminSettings {
-  return read<AdminSettings>('admin-settings.json', {
-    ivaRate: 23,
-    rounding: { aboveUnitTo999: true, belowUnitTo499: true }
+export async function saveCollectionMargins(data: CollectionMargins): Promise<void> {
+  await transaction(async db => {
+    await db.deleteFrom('collection_margins').execute();
+    await insertRows(db, 'collection_margins', Object.entries(data.rules).map(([id, r], position) => ({
+      collection_id: id, mode: r.mode, margin_value: r.marginValue, title: r._title ?? null, position,
+    })));
   });
 }
-export function saveAdminSettings(data: AdminSettings): void { write('admin-settings.json', data); }
 
-// ----- Connection Settings -----
-export function loadConnectionSettings(): ConnectionSettings {
-  return decryptFields(read<ConnectionSettings>('connection-settings.json', {}));
-}
-export function saveConnectionSettings(data: ConnectionSettings): void {
-  write('connection-settings.json', encryptFields(data));
-  // A cópia .bak teria a versão anterior (possivelmente em claro).
-  try { fs.rmSync(path.join(DATA_DIR, 'connection-settings.json.bak'), { force: true }); } catch { /* ignora */ }
-}
-
-// ----- Shopify Collection Mapping -----
-export function loadShopifyCollectionMapping(): ShopifyCollectionMapping {
-  return read<ShopifyCollectionMapping>('shopify-collection-mapping.json', { menu: {}, familia: {}, subfamilia: {} });
-}
-export function saveShopifyCollectionMapping(data: ShopifyCollectionMapping): void {
-  write('shopify-collection-mapping.json', data);
+export async function loadMappings(): Promise<Mappings> {
+  return transaction(async db => {
+    const lines = await db.selectFrom('line_mappings').selectAll().where('supplier', '=', supplier).orderBy('position').execute();
+    const targets = await db.selectFrom('line_to_menu').selectAll().where('supplier', '=', supplier).orderBy('position').orderBy('product_line').execute();
+    const families = await db.selectFrom('family_mappings').selectAll().where('supplier', '=', supplier).orderBy('position').execute();
+    return {
+      suprides: lines.map(r => ({ product_line: r.product_line, active: !!r.active,
+        ...(r.menu_item == null ? {} : { menuItem: r.menu_item }) })),
+      lineToMenu: Object.fromEntries(targets.map(r => [r.product_line, r.menu_target])),
+      familyMappings: families.map(r => ({ product_line: r.product_line, family: r.family, active: !!r.active,
+        ...(r.shopify_level2 == null ? {} : { shopifyLevel2: r.shopify_level2 }),
+        ...(r.shopify_level3 == null ? {} : { shopifyLevel3: r.shopify_level3 }) })),
+    };
+  });
 }
 
-// ----- Menu Items -----
+export async function saveMappings(data: Mappings): Promise<void> {
+  await transaction(async db => {
+    for (const table of ['line_mappings', 'line_to_menu', 'family_mappings']) {
+      await db.deleteFrom(table).where('supplier', '=', supplier).execute();
+    }
+    await insertRows(db, 'line_mappings', (data.suprides ?? []).map((l, position) => ({
+      supplier, position, product_line: l.product_line, active: Number(l.active !== false), menu_item: l.menuItem ?? null,
+    })));
+    await insertRows(db, 'line_to_menu', Object.entries(data.lineToMenu ?? {}).map(([line, target], position) => ({
+      supplier, product_line: line, menu_target: target, position,
+    })));
+    await insertRows(db, 'family_mappings', (data.familyMappings ?? []).map((f, position) => ({
+      supplier, position, product_line: f.product_line, family: f.family, active: Number(f.active !== false),
+      shopify_level2: f.shopifyLevel2 ?? null, shopify_level3: f.shopifyLevel3 ?? null,
+    })));
+  });
+}
+
+export async function loadAdminSettings(): Promise<AdminSettings> {
+  const row = await getMssql().selectFrom('admin_settings').selectAll().where('id', '=', 1).executeTakeFirst();
+  if (!row) return { ivaRate: 23, rounding: { aboveUnitTo999: true, belowUnitTo499: true } };
+  return {
+    ivaRate: row.iva_rate,
+    rounding: { aboveUnitTo999: !!row.rounding_above_unit_to_999, belowUnitTo499: !!row.rounding_below_unit_to_499 },
+    ...(row.auto_publish_public_menu == null ? {} : { autoPublishPublicMenu: !!row.auto_publish_public_menu }),
+    ...(row.create_new_products == null ? {} : { createNewProducts: !!row.create_new_products }),
+    ...(row.public_menu_handle == null ? {} : { publicMenuHandle: row.public_menu_handle }),
+    ...(row.public_menu_title == null ? {} : { publicMenuTitle: row.public_menu_title }),
+  };
+}
+
+export async function saveAdminSettings(data: AdminSettings): Promise<void> {
+  await transaction(async db => {
+    await db.deleteFrom('admin_settings').where('id', '=', 1).execute();
+    await db.insertInto('admin_settings').values({
+      id: 1, iva_rate: data.ivaRate, rounding_above_unit_to_999: Number(data.rounding.aboveUnitTo999),
+      rounding_below_unit_to_499: Number(data.rounding.belowUnitTo499),
+      auto_publish_public_menu: data.autoPublishPublicMenu == null ? null : Number(data.autoPublishPublicMenu),
+      create_new_products: data.createNewProducts == null ? null : Number(data.createNewProducts),
+      public_menu_handle: data.publicMenuHandle ?? null, public_menu_title: data.publicMenuTitle ?? null,
+    }).execute();
+  });
+}
+
+const connections = new AsyncLocalStorage<{ pending?: Promise<ConnectionSettings> }>();
+
+export function withConnectionSettings<T>(work: () => T): T {
+  return connections.run({}, work);
+}
+
+async function readConnectionSettings(): Promise<ConnectionSettings> {
+  const rows = await getMssql().selectFrom('connection_settings').select(['name', 'value']).execute();
+  return decryptFields(Object.fromEntries(rows.map(r => [r.name, r.value])));
+}
+
+export function loadConnectionSettings(): Promise<ConnectionSettings> {
+  const scope = connections.getStore();
+  if (!scope) return readConnectionSettings();
+  if (!scope.pending) {
+    const request = readConnectionSettings().catch(error => {
+      if (scope.pending === request) delete scope.pending;
+      throw error;
+    });
+    scope.pending = request;
+  }
+  return scope.pending;
+}
+
+export async function saveConnectionSettings(data: ConnectionSettings): Promise<void> {
+  const encrypted = Object.entries(encryptFields(data));
+  await transaction(async db => {
+    await db.deleteFrom('connection_settings').execute();
+    await insertRows(db, 'connection_settings', encrypted.map(([name, value]) => ({ name, value })));
+  });
+  const scope = connections.getStore();
+  if (scope) delete scope.pending;
+}
+
+export async function loadCustomPrompt(): Promise<string> {
+  const row = await getMssql().selectFrom('ai_prompts').select('text').where('name', '=', 'suprides_instructions').executeTakeFirst();
+  return row?.text ?? '';
+}
+
+export async function saveCustomPrompt(instructions: string): Promise<void> {
+  await transaction(async db => {
+    await db.deleteFrom('ai_prompts').where('name', '=', 'suprides_instructions').execute();
+    await db.insertInto('ai_prompts').values({ name: 'suprides_instructions', text: instructions }).execute();
+  });
+}
+
+export async function loadShopifyCollectionMapping(): Promise<ShopifyCollectionMapping> {
+  return transaction(async db => {
+    const rows = await db.selectFrom('collection_mapping').selectAll().where('supplier', '=', supplier)
+      .orderBy('level').orderBy('source_position').orderBy('source_key').orderBy('position').execute();
+    const hidden = await db.selectFrom('collection_mapping_hidden').select('hidden_key').execute();
+    const map: ShopifyCollectionMapping = { menu: {}, familia: {}, subfamilia: {} };
+    for (const level of levels) {
+      const section = new Map<string, string[]>();
+      for (const row of rows) {
+        if (row.level !== level) continue;
+        const values = section.get(row.source_key) ?? [];
+        values.push(row.collection_id);
+        section.set(row.source_key, values);
+      }
+      map[level] = Object.fromEntries(section);
+    }
+    if (hidden.length) map.hidden = Object.fromEntries(hidden.map(r => [r.hidden_key, true]));
+    return map;
+  });
+}
+
+export async function saveShopifyCollectionMapping(data: ShopifyCollectionMapping): Promise<void> {
+  await transaction(async db => {
+    await db.deleteFrom('collection_mapping').where('supplier', '=', supplier).execute();
+    await db.deleteFrom('collection_mapping_hidden').execute();
+    const rows: Row[] = [];
+    for (const level of levels) {
+      Object.entries(data[level]).forEach(([key, values], sourcePosition) => {
+        [...new Set(values)].forEach((value, position) => rows.push({
+          supplier, level, source_key: key, source_position: sourcePosition, collection_id: value, position,
+        }));
+      });
+    }
+    await insertRows(db, 'collection_mapping', rows);
+    await insertRows(db, 'collection_mapping_hidden', Object.entries(data.hidden ?? {})
+      .filter(([, hidden]) => hidden).map(([hidden_key]) => ({ hidden_key })));
+  });
+}
+
 function normalizeMenuNodes(nodes: MenuNode[]): MenuNode[] {
   if (!Array.isArray(nodes)) return [];
-  return nodes
-    .map(node => ({
-      title: String(node?.title || '').trim(),
-      shopifyId: node?.shopifyId ? String(node.shopifyId) : undefined,
-      children: normalizeMenuNodes(node?.children || [])
-    }))
-    .filter(node => node.title.length > 0);
+  return nodes.map(node => ({
+    title: String(node?.title || '').trim(),
+    ...(node?.shopifyId ? { shopifyId: String(node.shopifyId) } : {}),
+    children: normalizeMenuNodes(node?.children ?? []),
+  })).filter(node => node.title.length > 0);
 }
 
-export function loadMenuItems(): MenuNode[] {
-  const data = read<MenuItemsFile>('menu-items.json', { nodes: [] });
-  return normalizeMenuNodes(data.nodes);
+type Menu = 'main' | 'public';
+
+async function readMenu(db: Db, menu: Menu): Promise<MenuNode[]> {
+  const rows = await db.selectFrom('menu_nodes').selectAll().where('menu', '=', menu)
+    .orderBy('parent_id').orderBy('position').orderBy('id').execute();
+  const byId = new Map<number, MenuNode>();
+  const roots: MenuNode[] = [];
+  for (const row of rows) {
+    byId.set(row.id, { title: row.title, ...(row.shopify_id == null ? {} : { shopifyId: row.shopify_id }), children: [] });
+  }
+  for (const row of rows) {
+    const siblings = row.parent_id == null ? roots : byId.get(row.parent_id)!.children;
+    siblings.push(byId.get(row.id)!);
+  }
+  return roots;
 }
 
-export function saveMenuItems(nodes: MenuNode[]): MenuNode[] {
+async function writeMenu(db: Db, menu: Menu, nodes: MenuNode[]): Promise<void> {
+  await db.deleteFrom('menu_nodes').where('menu', '=', menu).execute();
+  let level = nodes.map((node, position) => ({ node, position, parent_id: null as number | null }));
+  while (level.length) {
+    const next: typeof level = [];
+    // 400 nós × 5 campos, dentro do limite de parâmetros do SQL Server.
+    for (let i = 0; i < level.length; i += 400) {
+      const batch = level.slice(i, i + 400);
+      const parents = await db.insertInto('menu_nodes').values(batch.map(({ node, parent_id, position }) => ({
+        menu, parent_id, position, title: node.title, shopify_id: node.shopifyId ?? null,
+      }))).output(['inserted.id', 'inserted.parent_id', 'inserted.position']).execute();
+      // OUTPUT não garante a ordem dos registos inseridos.
+      const ids = new Map(parents.map(row => [`${row.parent_id}/${row.position}`, row.id]));
+      for (const { node, parent_id, position } of batch) {
+        const id = ids.get(`${parent_id}/${position}`)!;
+        node.children.forEach((child, pos) => next.push({ node: child, position: pos, parent_id: id }));
+      }
+    }
+    level = next;
+  }
+}
+
+export async function loadMenuItems(): Promise<MenuNode[]> {
+  return normalizeMenuNodes(await readMenu(getMssql(), 'main'));
+}
+
+export async function saveMenuItems(nodes: MenuNode[]): Promise<MenuNode[]> {
   const normalized = normalizeMenuNodes(nodes);
-  write('menu-items.json', { nodes: normalized });
+  await transaction(db => writeMenu(db, 'main', normalized));
   return normalized;
 }
 
-// ----- Public Menu -----
-const DEFAULT_PUBLIC_MENU: PublicMenuFile = {
-  nodes: [],
-  stats: { generatedAt: '', sourceNodes: 0, publicNodes: 0, hiddenNodes: 0, activeCollectionIds: [] }
+export function loadPublicMenu(): Promise<PublicMenuFile> {
+  return transaction(async db => ({
+    nodes: await readMenu(db, 'public'),
+    stats: await loadAppState<PublicMenuStats>('public_menu_stats',
+      { generatedAt: '', sourceNodes: 0, publicNodes: 0, hiddenNodes: 0, activeCollectionIds: [] }, db),
+  }));
+}
+
+export function savePublicMenu(data: PublicMenuFile): Promise<void> {
+  return transaction(async db => {
+    await writeMenu(db, 'public', data.nodes);
+    await saveAppState('public_menu_stats', data.stats, db);
+  });
+}
+
+const defaultStats: SyncStats = {
+  api: 'suprides', lastSyncAt: null, totals: { requested: 0, synced: 0, created: 0, updated: 0, errors: 0 },
+  history: [], latestProducts: [],
 };
 
-export function loadPublicMenu(): PublicMenuFile {
-  return read<PublicMenuFile>('public-menu-items.json', DEFAULT_PUBLIC_MENU);
+export async function loadStats(): Promise<SyncStats> {
+  return transaction(async db => {
+    const state = await loadAppState('sync_stats', defaultStats, db);
+    const history = await db.selectFrom('sync_history').selectAll().orderBy('id').execute();
+    const latest = await db.selectFrom('sync_latest_products').selectAll().orderBy('position').execute();
+    return {
+      ...state,
+      history: history.map(r => ({
+        timestamp: r.ran_at.toISOString(), requested: r.requested, synced: r.synced,
+        created: r.created, updated: r.updated, errors: r.errors,
+      })),
+      latestProducts: latest.map(r => ({ sku: r.sku, title: r.title, action: r.action, syncedAt: r.synced_at?.toISOString() })),
+    };
+  });
 }
 
-export function savePublicMenu(data: PublicMenuFile): void {
-  write('public-menu-items.json', data);
+export function saveStats(data: SyncStats): Promise<void> {
+  return transaction(async db => {
+    await saveAppState('sync_stats', { api: data.api, lastSyncAt: data.lastSyncAt, totals: data.totals }, db);
+    await db.deleteFrom('sync_history').execute();
+    await db.deleteFrom('sync_latest_products').execute();
+    await insertRows(db, 'sync_history', data.history.map(h => ({
+      ran_at: h.timestamp, requested: h.requested, synced: h.synced, created: h.created, updated: h.updated, errors: h.errors,
+    })));
+    await insertRows(db, 'sync_latest_products', data.latestProducts.map((p, position) => ({
+      position, sku: p.sku, title: p.title, action: p.action, synced_at: p.syncedAt,
+    })));
+  });
 }
 
-// ----- Sync Stats -----
-const DEFAULT_STATS: SyncStats = {
-  api: 'suprides',
-  lastSyncAt: null,
-  totals: { requested: 0, synced: 0, created: 0, updated: 0, errors: 0 },
-  history: [],
-  latestProducts: []
-};
-export function loadStats(): SyncStats { return read<SyncStats>('sync-stats.json', DEFAULT_STATS); }
-export function saveStats(data: SyncStats): void { write('sync-stats.json', data); }
-export function resetStats(): SyncStats { saveStats(DEFAULT_STATS); return DEFAULT_STATS; }
-
-// ----- Custom AI Prompt -----
-export function loadCustomPrompt(): string {
-  return read<{ instructions: string }>('custom-prompt.json', { instructions: '' }).instructions ?? '';
+export async function resetStats(): Promise<SyncStats> {
+  await saveStats(defaultStats);
+  return structuredClone(defaultStats);
 }
-export function saveCustomPrompt(instructions: string): void {
-  write('custom-prompt.json', { instructions });
-}
-
-// ----- Products Cache -----
-interface CacheFile { cachedAt: number; products: any[] }
-const CACHE_TTL = 60 * 60 * 1000;
-
-let memCache: any[] | null = null;
-let memCacheAt = 0;
-let fetchingPromise: Promise<any[]> | null = null;
-
-// Carregar do disco ao iniciar
-(function () {
-  const raw = read<CacheFile | null>('products-cache.json', null);
-  if (raw && Array.isArray(raw.products) && (Date.now() - (raw.cachedAt || 0)) < CACHE_TTL) {
-    memCache   = raw.products;
-    memCacheAt = raw.cachedAt;
-  }
-})();
-
-export function getCachedProducts(): { products: any[] | null; age: number } {
-  return { products: memCache, age: Date.now() - memCacheAt };
-}
-
-export function isCacheValid(): boolean {
-  return !!memCache && (Date.now() - memCacheAt) < CACHE_TTL;
-}
-
-export function setCache(products: any[]): void {
-  memCache   = products;
-  memCacheAt = Date.now();
-  write('products-cache.json', { cachedAt: memCacheAt, products });
-}
-
-export function getFetchingPromise(): Promise<any[]> | null { return fetchingPromise; }
-export function setFetchingPromise(p: Promise<any[]> | null): void { fetchingPromise = p; }
