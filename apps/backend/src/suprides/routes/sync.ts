@@ -1,3 +1,4 @@
+import { withCatalogueLock } from '../../repositories/suprides-cache';
 import { Router } from 'express';
 import { getAllProducts, buildFamiliasFromProducts } from '../services/products-cache';
 import { parseStockStatus, formatStockStatusLabel, type StockStatus } from '../api/suprides-api';
@@ -11,9 +12,11 @@ import { planProductWrite, contentHash, type DesiredProduct } from '../services/
 import { normalizeMoney, applyMargin, applyRounding, slug } from '../services/price-calc';
 import { loadSupridesTaxonomy, normTaxonomyValue } from '../services/taxonomy';
 import {
-  loadAdminSettings, loadMargins, loadMenuItems, loadShopifyCollectionMapping, loadStats, saveStats, loadCollectionMargins
+  loadMenuItems, loadPublicMenu, loadShopifyCollectionMapping, loadStats, saveStats
 } from '../repositories/store';
-import { getSqlite } from '../../db/sqlite';
+import { getMssql } from '../../db/mssql';
+import { loadAppState, saveAppState } from '../../db/app-state';
+import { loadSyncData, updateShopifyIds, type ShopifyIdUpdate } from '../repositories/sync-data';
 import { buildPublicMenuTree, publishPublicMenu } from '../services/public-menu';
 import { rebuildProductNodeIds } from '../services/menu-resolver';
 import {
@@ -24,7 +27,7 @@ import {
   uniqueIds,
   CollectionHierarchy,
 } from './sync-helpers';
-import type { CollectionMargins, CollectionMarginRule } from '../types';
+import type { CollectionMargins, CollectionMarginRule, MenuNode, SupridesProduct } from '../types';
 import fs from 'fs';
 import path from 'path';
 import { readAllProducts, buildSkuIndex, type SnapshotProduct } from '../api/shopify-read';
@@ -91,16 +94,16 @@ router.post('/cancel', (_req, res) => {
 
 const buildActiveCollectionIndexes = _buildIndexes;
 
-function collectionTitleLookup(): Map<string, string> {
+function collectionTitleLookup(menu: MenuNode[]): Map<string, string> {
   const out = new Map<string, string>();
-  const walk = (nodes: ReturnType<typeof loadMenuItems>) => {
+  const walk = (nodes: MenuNode[]) => {
     for (const node of nodes) {
       if (node.shopifyId) out.set(node.shopifyId, node.title);
       out.set(node.title, node.title);
       if (node.children?.length) walk(node.children);
     }
   };
-  walk(loadMenuItems());
+  walk(menu);
   return out;
 }
 
@@ -110,10 +113,10 @@ const collectionHierarchyLookup = _hierarchyLookup;
 router.get('/sync-familias/audit', async (req, res) => {
   try {
     const taxonomy = await loadSupridesTaxonomy();
-    const collMap = loadShopifyCollectionMapping();
+    const [collMap, menu] = await Promise.all([loadShopifyCollectionMapping(), loadMenuItems()]);
     const { lineToCollIds, familyToCollIds, subToCollIds } = buildActiveCollectionIndexes(collMap);
-    const titleById = collectionTitleLookup();
-    const hierarchyById = collectionHierarchyLookup();
+    const titleById = collectionTitleLookup(menu);
+    const hierarchyById = collectionHierarchyLookup(menu);
     const hidden = collMap.hidden || {};
     const sampleLimitRaw = Number(req.query.limit ?? 100);
     const sampleLimit = Number.isFinite(sampleLimitRaw) ? Math.max(0, sampleLimitRaw) : 100;
@@ -334,18 +337,16 @@ router.post('/sync-familias', (req, res) => {
   }
   const resume = req.body?.resume === true;
   const run = { startedAt: new Date().toISOString(), resume } as NonNullable<typeof lastResult>;
-  lastResult = run;
-  // Marca já como em curso, para o primeiro /progress do frontend não ver running=false.
-  syncProgress = { running: true, total: 0, done: 0, errors: 0, phase: 'leitura' };
-  runFullShopifySync({ resume })
-    .then(result => { run.ok = true; run.result = result; })
+  runFullShopifySync({ resume }, () => {
+    lastResult = run;
+    res.status(202).json({ ok: true, message: 'Sincronização iniciada', startedAt: run.startedAt });
+  }).then(result => { run.ok = true; run.result = result; })
     .catch((err: any) => {
       run.ok = false;
       run.error = err?.message ?? String(err);
+      if (!res.headersSent) res.status(err?.code === 'BUSY' ? 409 : 500).json({ error: run.error });
       logLine(`[Suprides] Sync falhou: ${run.error}`);
-    })
-    .finally(() => { run.finishedAt = new Date().toISOString(); });
-  res.status(202).json({ ok: true, message: 'Sincronização iniciada', startedAt: run.startedAt });
+    }).finally(() => { run.finishedAt = new Date().toISOString(); });
 });
 
 router.get('/sync-familias/last-result', (_req, res) => {
@@ -379,7 +380,7 @@ router.post('/sync-familias/dry-run', async (req, res) => {
 });
 
 /**
- * Sync completo SQLite → Shopify (produtos, preço, custo, imagens, coleções, metafields, menu público).
+ * Sync completo SQL Server → Shopify (produtos, preço, custo, imagens, coleções, metafields, menu público).
  * Usado pela rota POST /sync-familias e pelo agendamento diário.
  */
 /** O que o sync faria a um produto (modo dryRun — nada é escrito na Shopify nem em disco). */
@@ -399,13 +400,21 @@ export interface SyncPlanItem {
   changes?: string[];
 }
 
-export async function runFullShopifySync(opts: {
+interface SyncOptions {
   resume?: boolean; dryRun?: boolean;
-  /** Só para testes: substitui a leitura da loja (apenas em dryRun). */
+  /** Simular com uma cópia da loja ou com dados de teste em memória. */
   readShop?: () => Promise<SnapshotProduct[]>;
+  readLocal?: typeof loadSyncData;
   /** Não enviar imagens neste sync (ficam por enviar; ver /sync-images). */
   skipImages?: boolean;
-} = {}) {
+}
+
+export function runFullShopifySync(opts: SyncOptions = {}, onStart?: () => void) {
+  const run = () => runSync(opts, onStart);
+  return opts.dryRun ? run() : withCatalogueLock(run);
+}
+
+async function runSync(opts: SyncOptions, onStart?: () => void) {
   if (fullSyncRunning) throw Object.assign(new Error('Já há uma sincronização em curso'), { code: 'BUSY' });
   fullSyncRunning = true;
   const dryRun = opts.dryRun === true;
@@ -414,75 +423,53 @@ export async function runFullShopifySync(opts: {
   resetSyncAbort();
   syncProgress = { running: true, total: 0, done: 0, errors: 0, phase: 'leitura' };
   try {
+    onStart?.();
     const resume = opts.resume === true;
 
-    const settings = loadAdminSettings();
+    const { settings, collMap, menu, collMargins, products: all, states, tags } =
+      await (dryRun && opts.readLocal ? opts.readLocal : loadSyncData)();
     const createNewProducts = settings.createNewProducts === true;
-    const collMap = loadShopifyCollectionMapping();
     const indexes = buildActiveCollectionIndexes(collMap);
     const { lineToCollIds, familyToCollIds, subToCollIds } = indexes;
-    const hierarchyById = collectionHierarchyLookup();
+    const hierarchyById = collectionHierarchyLookup(menu);
 
     const eligibleLines = new Set([...lineToCollIds.keys(), ...familyToCollIds.keys()]);
     if (eligibleLines.size === 0) {
       return { message: 'Nenhuma linha de produto com mapeamento ativo', created: 0, updated: 0, errors: [] };
     }
 
-    const collMargins = loadCollectionMargins();
-
-    const all = await getAllProducts(false);
-
-    // Carregar shopify_node_id por SKU para fallback de produtos sem mapeamento L2/L3
-    const nodeRows = getSqlite()
-      .prepare("SELECT sku, shopify_node_id FROM suprides_products WHERE shopify_node_id IS NOT NULL AND shopify_node_id != ''")
-      .all() as { sku: string; shopify_node_id: string }[];
-    const skuNodeMap = new Map<string, string>(nodeRows.map(r => [r.sku, r.shopify_node_id]));
-
-    const db = getSqlite();
-
-    // Produtos já sincronizados (para modo resume)
-    // Retomar: saltar só os SKUs já enviados na execução interrompida (registada em sync-run.json).
-    // Se a última execução terminou (ou não há registo), "retomar" faz um sync completo.
-    const runFile = dataPath('suprides', 'sync-run.json');
-    let lastRun: { startedAt: string; finishedAt: string | null } | null = null;
-    try { lastRun = JSON.parse(fs.readFileSync(runFile, 'utf8')); } catch { /* sem registo */ }
-    const resumeSince = resume && lastRun && !lastRun.finishedAt ? lastRun.startedAt : null;
-    const syncedSkus = resumeSince
-      ? new Set(
-          (db.prepare('SELECT sku FROM suprides_products WHERE shopify_synced_at >= ?').all(resumeSince) as { sku: string }[])
-            .map(r => r.sku)
-        )
-      : new Set<string>();
-    const runStartedAt = resumeSince ?? new Date().toISOString();
-    if (!dryRun) {
-      fs.mkdirSync(path.dirname(runFile), { recursive: true });
-      fs.writeFileSync(runFile, JSON.stringify({ startedAt: runStartedAt, finishedAt: null }, null, 1));
-      if (resumeSince) logLine(`[Suprides] A retomar a execução de ${resumeSince}: ${syncedSkus.size} produtos já enviados ficam de fora`);
-    }
-    const markSynced = db.prepare('UPDATE suprides_products SET shopify_synced_at = ? WHERE sku = ?');
-
-    // Pré-carregar IDs Shopify já conhecidos do SQLite (evita findVariantBySku + garante que produtos
-    // previamente sincronizados continuam a ser incluídos mesmo que shopify_node_id esteja vazio)
+    const skuNodeMap = new Map<string, string>();
+    const skuContentHash = new Map<string, string>();
     interface ShopifyCache { productId: number; variantId: number; inventoryItemId: number }
     const skuShopifyCache = new Map<string, ShopifyCache>();
     const skuImagesSynced = new Map<string, boolean>();
-    {
-      const rows = db.prepare(
-        `SELECT sku, shopify_product_id, shopify_variant_id, shopify_inventory_item_id, images_synced
-         FROM suprides_products
-         WHERE shopify_product_id IS NOT NULL
-           AND shopify_variant_id IS NOT NULL
-           AND shopify_inventory_item_id IS NOT NULL`
-      ).all() as { sku: string; shopify_product_id: number; shopify_variant_id: number; shopify_inventory_item_id: number; images_synced: number }[];
-      for (const r of rows) {
+    const supplierSkus = new Set<string>();
+    for (const r of states) {
+      supplierSkus.add(r.sku);
+      if (r.shopify_node_id) skuNodeMap.set(r.sku, r.shopify_node_id);
+      if (r.shopify_content_hash) skuContentHash.set(r.sku, r.shopify_content_hash);
+      if (r.shopify_product_id && r.shopify_variant_id && r.shopify_inventory_item_id) {
         skuShopifyCache.set(r.sku, {
-          productId: r.shopify_product_id,
-          variantId: r.shopify_variant_id,
-          inventoryItemId: r.shopify_inventory_item_id,
+          productId: Number(r.shopify_product_id), variantId: Number(r.shopify_variant_id),
+          inventoryItemId: Number(r.shopify_inventory_item_id),
         });
         skuImagesSynced.set(r.sku, r.images_synced === 1);
       }
-      console.log(`[Suprides] Cache local Shopify: ${skuShopifyCache.size} SKUs já conhecidos`);
+    }
+
+    type SyncRun = { startedAt: string; finishedAt: string | null };
+    const lastRun = resume ? await loadAppState<SyncRun | null>('sync_run', null) : null;
+    const resumeSince = lastRun && !lastRun.finishedAt ? lastRun.startedAt : null;
+    const syncedSkus = new Set<string>();
+    if (resumeSince) {
+      const rows = await getMssql().selectFrom('products').select('sku')
+        .where('supplier', '=', 'suprides').where('shopify_synced_at', '>=', resumeSince).execute();
+      for (const r of rows) syncedSkus.add(r.sku);
+    }
+    const runStartedAt = resumeSince ?? new Date().toISOString();
+    if (!dryRun) {
+      await saveAppState('sync_run', { startedAt: runStartedAt, finishedAt: null });
+      if (resumeSince) logLine(`[Suprides] A retomar a execução de ${resumeSince}: ${syncedSkus.size} produtos já enviados ficam de fora`);
     }
 
     // Estado real da loja, lido numa só passagem. No modo real fica também gravado como
@@ -500,7 +487,7 @@ export async function runFullShopifySync(opts: {
     }
     if (syncCancelled) throw Object.assign(new Error('SYNC_CANCELLED'), { cancelled: true });
 
-    // A loja manda: IDs da Shopify substituem os do SQLite; SKUs que já não existem na loja
+    // A loja manda: IDs da Shopify substituem os do catálogo; SKUs que já não existem na loja
     // saem da cache (um produto apagado à mão não é recriado — vira skip-new).
     {
       const { index, duplicates } = buildSkuIndex(shopProducts);
@@ -508,30 +495,21 @@ export async function runFullShopifySync(opts: {
         logLine(`[Suprides] Aviso: ${duplicates.length} SKUs repetidos na loja (usado o 1.º produto): ${duplicates.slice(0, 10).join(', ')}`);
       }
       let fixed = 0, gone = 0;
-      const upd = db.prepare(`UPDATE suprides_products
-                              SET shopify_product_id = ?, shopify_variant_id = ?, shopify_inventory_item_id = ?
-                              WHERE sku = ?`);
-      const clear = db.prepare(`UPDATE suprides_products
-                                SET shopify_product_id = NULL, shopify_variant_id = NULL, shopify_inventory_item_id = NULL
-                                WHERE sku = ?`);
-      const apply = db.transaction(() => {
-        for (const sku of [...skuShopifyCache.keys()]) {
-          if (!index.has(sku)) {
-            skuShopifyCache.delete(sku);
-            gone++;
-            if (!dryRun) clear.run(sku);
-          }
-        }
-        for (const [sku, e] of index) {
-          const c = skuShopifyCache.get(sku);
-          if (!c || c.productId !== e.productId || c.variantId !== e.variantId || c.inventoryItemId !== e.inventoryItemId) {
-            skuShopifyCache.set(sku, e);
-            fixed++;
-            if (!dryRun) upd.run(e.productId, e.variantId, e.inventoryItemId, sku);
-          }
-        }
-      });
-      apply();
+      const updates: ShopifyIdUpdate[] = [];
+      for (const sku of skuShopifyCache.keys()) {
+        if (index.has(sku)) continue;
+        skuShopifyCache.delete(sku);
+        gone++;
+        updates.push({ sku, productId: null, variantId: null, inventoryItemId: null });
+      }
+      for (const [sku, e] of index) {
+        const c = skuShopifyCache.get(sku);
+        if (c && c.productId === e.productId && c.variantId === e.variantId && c.inventoryItemId === e.inventoryItemId) continue;
+        skuShopifyCache.set(sku, e);
+        fixed++;
+        if (supplierSkus.has(sku)) updates.push({ sku, productId: e.productId, variantId: e.variantId, inventoryItemId: e.inventoryItemId });
+      }
+      if (!dryRun) await updateShopifyIds(updates);
       console.log(`[Suprides] Índice da loja: ${index.size} SKUs; ${fixed} IDs acertados, ${gone} SKUs da cache já não existem na loja`);
     }
 
@@ -546,8 +524,7 @@ export async function runFullShopifySync(opts: {
     const shopBySku = new Map<string, SnapshotProduct>();
     const shopById = new Map<number, SnapshotProduct>(shopProducts.map(sp => [sp.productId, sp]));
     for (const sp of shopProducts) if (sp.sku && !shopBySku.has(sp.sku)) shopBySku.set(sp.sku, sp);
-    const filtrados = all.filter(p => {
-      if (resume && syncedSkus.has(p.sku)) return false;
+    const eligible = all.filter(p => {
       const line = normTaxonomyValue((p.product_line || '').trim());
       if (!eligibleLines.has(line)) {
         if (!skuShopifyCache.has(p.sku)) return false;
@@ -563,30 +540,14 @@ export async function runFullShopifySync(opts: {
       return skuNodeMap.has(p.sku) || skuShopifyCache.has(p.sku);
     });
 
-    if (filtrados.length === 0) {
+    if (eligible.length === 0) {
+      if (!dryRun) await saveAppState('sync_run', { startedAt: runStartedAt, finishedAt: new Date().toISOString() });
       return { message: 'Nenhum produto encontrado para as linhas mapeadas', created: 0, updated: 0, errors: [] };
     }
 
-    // Carregar tags normalizadas (preferência) ou brutas como fallback
-    const normalizedCount = (db.prepare('SELECT COUNT(*) as n FROM sp_product_tag_values_normalized').get() as any).n;
-    const aiTagRows = normalizedCount > 0
-      ? db.prepare(`
-          SELECT n.product_ref AS sku, tg.nome AS group_name, n.normalized_value AS value
-          FROM sp_product_tag_values_normalized n
-          JOIN sp_tag_groups tg ON tg.id = n.tag_group_id
-          WHERE n.normalized_value IS NOT NULL AND n.normalized_value != ''
-        `).all() as { sku: string; group_name: string; value: string }[]
-      : db.prepare(`
-          SELECT ptv.sku, tg.nome AS group_name, ptv.value
-          FROM sp_product_tag_values ptv
-          JOIN sp_tag_groups tg ON tg.id = ptv.tag_group_id
-          WHERE ptv.value IS NOT NULL AND ptv.value != ''
-        `).all() as { sku: string; group_name: string; value: string }[];
-
-    console.log(`[Suprides] Metafields: ${normalizedCount > 0 ? 'normalizados' : 'brutos (corre Normalizar para melhorar)'} — ${aiTagRows.length} registos`);
-
+    const filtrados = eligible.filter(p => !syncedSkus.has(p.sku));
     const skuTagMap = new Map<string, { group: string; value: string }[]>();
-    for (const row of aiTagRows) {
+    for (const row of tags) {
       if (!skuTagMap.has(row.sku)) skuTagMap.set(row.sku, []);
       skuTagMap.get(row.sku)!.push({ group: row.group_name, value: row.value });
     }
@@ -598,13 +559,6 @@ export async function runFullShopifySync(opts: {
     const skippedNew: string[] = [];     // não existem na Shopify e createNewProducts está desligado
     let noMarginRule = 0;                // preço calculado sem regra de margem (custo + IVA)
     let unchanged = 0;                   // produtos existentes em que nada muda (nada enviado)
-
-    // Hash do conteúdo (título/descrição/marca/tipo/filtros) enviado da última vez.
-    const skuContentHash = new Map<string, string>(
-      (db.prepare('SELECT sku, shopify_content_hash h FROM suprides_products WHERE shopify_content_hash IS NOT NULL').all() as { sku: string; h: string }[])
-        .map(r => [r.sku, r.h]),
-    );
-    const saveContentHash = db.prepare('UPDATE suprides_products SET shopify_content_hash = ? WHERE sku = ?');
 
     // Imagens: acrescenta só as que faltam e que a Suprides já tem (não o ícone genérico).
     // Só fica marcado quando tudo está pronto na loja; o resto é confirmado por images:run.
@@ -627,6 +581,25 @@ export async function runFullShopifySync(opts: {
 
     // Acumula IDs de coleções que têm pelo menos um produto ativo (stock > 0)
     const activeCollectionIdSet = new Set<string>();
+
+    const productCollections = (p: SupridesProduct, line: string, family: string, sub: string, shopCurrent?: SnapshotProduct) => {
+      if (shopCurrent) return [...shopCurrent.collectionIds];
+      const ids = buildDerivedCollectionIds(line, family, sub, collMap, indexes, hierarchyById);
+      const nodeId = skuNodeMap.get(p.sku);
+      if (nodeId && !ids.some(id => hierarchyById.get(id)?.l1Id)) return [nodeId];
+      return ids;
+    };
+
+    // A retoma precisa das coleções dos produtos já enviados para reconstruir o menu completo.
+    for (const p of eligible) {
+      if (!syncedSkus.has(p.sku) || !skuShopifyCache.has(p.sku)) continue;
+      if ((p.stock_status || parseStockStatus(p.stock)) === 'sem_stock') continue;
+      if (!(parseFloat(normalizeMoney(String(p.price ?? ''))) > 0)) continue;
+      const shopCurrent = shopCollectionSkus.has(p.sku) ? shopBySku.get(p.sku) : undefined;
+      for (const id of productCollections(p, p.product_line || '', p.family || '', p.sub_family || '', shopCurrent)) {
+        activeCollectionIdSet.add(id);
+      }
+    }
 
     // Cache de resolução collId → numId partilhado entre workers (promise-based para evitar duplicados)
     const resolvedCollIdCache = new Map<string, Promise<number | null>>();
@@ -702,13 +675,7 @@ export async function runFullShopifySync(opts: {
       const costPrice = cost.toFixed(2);
       // Fora do mapeamento: coleções atuais da loja (só para a margem; não se acrescentam).
       const shopCurrent = shopCollectionSkus.has(p.sku) ? shopBySku.get(p.sku) : undefined;
-      let collectionIds = shopCurrent
-        ? [...shopCurrent.collectionIds]
-        : buildDerivedCollectionIds(line, fam, sub, collMap, indexes, hierarchyById);
-      if (!shopCurrent && !collectionIds.some(id => !!(hierarchyById.get(id)?.l1Id))) {
-        const nodeId = skuNodeMap.get(p.sku);
-        if (nodeId) collectionIds = [nodeId];
-      }
+      const collectionIds = productCollections(p, line, fam, sub, shopCurrent);
       const rule = findCollectionMargin(collectionIds, collMargins, hierarchyById);
       let basePrice = cost;
       if (rule) basePrice = applyMargin(basePrice, rule.mode, rule.marginValue);
@@ -801,10 +768,10 @@ export async function runFullShopifySync(opts: {
           metafields: [{ namespace: 'custom', key: 'stock_status', value: desired.stockStatusLabel }, ...filtros],
         });
         if (desired.status === 'ACTIVE') await publishProduct(createdIds.productId);
-        db.prepare(`UPDATE suprides_products
-                    SET shopify_product_id = ?, shopify_variant_id = ?, shopify_inventory_item_id = ?, shopify_content_hash = ?
-                    WHERE sku = ?`)
-          .run(createdIds.productId, createdIds.variantId, createdIds.inventoryItemId, contentHash(desired), p.sku);
+        await getMssql().updateTable('products').set({
+          shopify_product_id: createdIds.productId, shopify_variant_id: createdIds.variantId,
+          shopify_inventory_item_id: createdIds.inventoryItemId, shopify_content_hash: contentHash(desired),
+        }).where('supplier', '=', 'suprides').where('sku', '=', p.sku).execute();
         skuShopifyCache.set(p.sku, { productId: createdIds.productId, variantId: createdIds.variantId, inventoryItemId: createdIds.inventoryItemId });
         markDone(p, 'created');
         if (!opts.skipImages && imageUrls.length) await syncImages(p.sku, createdIds.productId, imageUrls);
@@ -830,7 +797,8 @@ export async function runFullShopifySync(opts: {
       if (w.variant) { throwIfCancelled(); await variantUpdate(known.productId, known.variantId, w.variant); }
       if (w.publish) { throwIfCancelled(); await publishProduct(known.productId); }
       if (w.product && w.contentHash !== skuContentHash.get(p.sku)) {
-        saveContentHash.run(w.contentHash, p.sku);
+        await getMssql().updateTable('products').set({ shopify_content_hash: w.contentHash })
+          .where('supplier', '=', 'suprides').where('sku', '=', p.sku).execute();
         skuContentHash.set(p.sku, w.contentHash);
       }
       markDone(p, 'updated');
@@ -850,7 +818,10 @@ export async function runFullShopifySync(opts: {
           if (!p) break;
           try {
             await processProduct(p);
-            if (!dryRun) markSynced.run(new Date().toISOString(), p.sku);
+            if (!dryRun) {
+              await getMssql().updateTable('products').set({ shopify_synced_at: new Date().toISOString() })
+                .where('supplier', '=', 'suprides').where('sku', '=', p.sku).execute();
+            }
           } catch (e: any) {
             if (e?.cancelled || e?.code === 'ERR_CANCELED') break;
             const errDetail = e?.response?.data || e?.message || String(e);
@@ -904,39 +875,44 @@ export async function runFullShopifySync(opts: {
       };
     }
 
-    const stats = loadStats();
-    stats.lastSyncAt = syncedAt;
-    stats.totals.requested += filtrados.length;
-    stats.totals.synced    += created + updated;
-    stats.totals.created   += created;
-    stats.totals.updated   += updated;
-    stats.totals.errors    += errors.length;
-    stats.history.push({ timestamp: syncedAt, requested: filtrados.length, synced: created + updated, created, updated, errors: errors.length });
-    if (stats.history.length > 50) stats.history = stats.history.slice(-50);
-    stats.latestProducts = [
-      ...touchedLog.slice(-20).reverse().map(t => ({ ...t, syncedAt })),
-      ...stats.latestProducts
-    ].slice(0, 50);
-    saveStats(stats);
+    if (filtrados.length) {
+      const stats = await loadStats();
+      stats.lastSyncAt = syncedAt;
+      stats.totals.requested += filtrados.length;
+      stats.totals.synced    += created + updated;
+      stats.totals.created   += created;
+      stats.totals.updated   += updated;
+      stats.totals.errors    += errors.length;
+      stats.history.push({ timestamp: syncedAt, requested: filtrados.length, synced: created + updated, created, updated, errors: errors.length });
+      if (stats.history.length > 50) stats.history = stats.history.slice(-50);
+      stats.latestProducts = [
+        ...touchedLog.slice(-20).reverse().map(t => ({ ...t, syncedAt })),
+        ...stats.latestProducts
+      ].slice(0, 50);
+      await saveStats(stats);
+    }
 
     // Gerar e (opcionalmente) publicar menu público
-    const publicMenuFile = buildPublicMenuTree([...activeCollectionIdSet]);
+    const completed = !syncCancelled && !errors.length;
+    const publicMenuFile = completed ? await buildPublicMenuTree([...activeCollectionIdSet]) : await loadPublicMenu();
 
     // Reconstruir shopify_node_id agora que o menu público está actualizado
     try {
-      const { updated: nodeUpdated } = rebuildProductNodeIds();
-      console.log(`[Suprides] shopify_node_id reconstruídos: ${nodeUpdated} produtos`);
+      if (completed) {
+        const { updated: nodeUpdated } = await rebuildProductNodeIds();
+        console.log(`[Suprides] shopify_node_id reconstruídos: ${nodeUpdated} produtos`);
+      }
     } catch (e: any) {
       console.warn('[Suprides] rebuildProductNodeIds falhou:', e?.message);
     }
 
     let menuPublishWarning: string | undefined;
 
-    const shouldPublish = (settings as any).autoPublishPublicMenu !== false;
-    if (shouldPublish && !syncCancelled) {
+    const shouldPublish = settings.autoPublishPublicMenu !== false;
+    if (shouldPublish && completed && !syncCancelled) {
       try {
-        const menuHandle = (settings as any).publicMenuHandle || 'menu-publico';
-        const menuTitle  = (settings as any).publicMenuTitle  || 'Menu Público';
+        const menuHandle = settings.publicMenuHandle || 'menu-publico';
+        const menuTitle  = settings.publicMenuTitle  || 'Menu Público';
         const pubResult = await publishPublicMenu(menuHandle, menuTitle);
         if (!pubResult.ok) {
           menuPublishWarning = `Menu público gerado mas não publicado: ${pubResult.errors.join('; ')}`;
@@ -950,8 +926,8 @@ export async function runFullShopifySync(opts: {
 
     const wasCancelled = syncCancelled;
     syncCancelled = false;
-    if (!wasCancelled) {
-      fs.writeFileSync(runFile, JSON.stringify({ startedAt: runStartedAt, finishedAt: new Date().toISOString() }, null, 1));
+    if (!wasCancelled && !errors.length) {
+      await saveAppState('sync_run', { startedAt: runStartedAt, finishedAt: new Date().toISOString() });
     }
     if (noCostHidden.length || noCostSkipped.length) {
       console.warn(`[Suprides] Sem preço de custo: ${noCostHidden.length} passados a draft, ${noCostSkipped.length} não criados`);
@@ -996,13 +972,13 @@ router.post('/reconcile-removes', async (req, res) => {
     dryRun?: boolean; collectionIds?: string[]; excludeFamilies?: string[];
   };
   try {
-    const all = await getAllProducts(false);
+    const all = await getAllProducts();
     const skuToProduct = new Map(all.map((p: any) => [p.sku, p]));
 
-    const collMap = loadShopifyCollectionMapping();
+    const [collMap, menu] = await Promise.all([loadShopifyCollectionMapping(), loadMenuItems()]);
     const indexes = buildActiveCollectionIndexes(collMap);
-    const hierarchyById = collectionHierarchyLookup();
-    const titleById = collectionTitleLookup();
+    const hierarchyById = collectionHierarchyLookup(menu);
+    const titleById = collectionTitleLookup(menu);
     const hidden = collMap.hidden || {};
 
     const allMapped = [
@@ -1066,18 +1042,69 @@ router.post('/reconcile-removes', async (req, res) => {
 
 router.post('/sync-familias-cache', async (_req, res) => {
   try {
-    const all = await getAllProducts(true);
+    const all = await getAllProducts();
     res.json(buildFamiliasFromProducts(all));
   } catch (err: any) {
     res.status(500).json({ error: 'Erro ao atualizar cache', detail: err.message });
   }
 });
 
+async function syncStock() {
+  const shop = await readAllProducts();
+  const byId = new Map(shop.map(sp => [sp.productId, sp]));
+  const stored = await getMssql().selectFrom('products')
+    .select(['sku', 'shopify_product_id', 'stock_status', 'stock'])
+    .where('supplier', '=', 'suprides').where('shopify_product_id', 'is not', null).execute();
+  const rows = stored.map(r => ({ sku: String(r.sku), stock_status: r.stock_status, stock: r.stock, shopify_product_id: Number(r.shopify_product_id) }))
+    .filter(r => byId.has(r.shopify_product_id));
+
+  if (rows.length === 0) {
+    return { message: 'Nenhum produto sincronizado ao Shopify', updated: 0, errors: [] };
+  }
+
+  let updated = 0;
+  const errors: { sku: string; error: unknown }[] = [];
+
+  const processOne = async (r: typeof rows[number]) => {
+    const cur = byId.get(r.shopify_product_id)!;
+    const stockStatus = r.stock_status || parseStockStatus(r.stock != null ? String(r.stock) : undefined);
+    const status = stockStatus === 'sem_stock' ? 'DRAFT' : 'ACTIVE';
+    const label = formatStockStatusLabel(stockStatus as StockStatus);
+    const input: Record<string, unknown> = {};
+    if (cur.status !== status) input.status = status;
+    if ((cur.stockStatus ?? '') !== label) {
+      input.metafields = [{ namespace: 'custom', key: 'stock_status', value: label, type: 'single_line_text_field' }];
+    }
+    if (!Object.keys(input).length) return;
+    await productUpdate(r.shopify_product_id, input);
+    if (status === 'ACTIVE' && !cur.publishedAt) await publishProduct(r.shopify_product_id);
+    updated++;
+  };
+
+  const CONCURRENCY = 5;
+  const queue = [...rows];
+  await Promise.all(
+    Array.from({ length: CONCURRENCY }, async () => {
+      while (true) {
+        const r = queue.shift();
+        if (!r) break;
+        try {
+          await processOne(r);
+        } catch (e: any) {
+          errors.push({ sku: r.sku, error: e?.response?.data || e?.message || String(e) });
+        }
+      }
+    })
+  );
+
+  return { message: `Stock sincronizado: ${updated} produtos alterados`, updated, errors };
+}
+
 // Sync rápido — só estado de stock. Não toca em títulos, imagens, preços nem coleções.
 // Lê a loja e, para cada produto já na Shopify, envia só o que mudou:
 //   - status do produto (ACTIVE / DRAFT) consoante o stock_status (publica se reativar);
 //   - metafield custom.stock_status.
-// Lê o stock_status que a importação (API → SQLite) gravou.
+// Lê o stock_status que a importação (API → SQL Server) gravou.
 router.post('/sync-stock', async (_req, res) => {
   if (fullSyncRunning) {
     res.status(409).json({ error: 'Há um sync em curso' });
@@ -1085,57 +1112,9 @@ router.post('/sync-stock', async (_req, res) => {
   }
   fullSyncRunning = true;
   try {
-    const shop = await readAllProducts();
-    const byId = new Map(shop.map(sp => [sp.productId, sp]));
-    const rows = (getSqlite().prepare(
-      `SELECT sku, shopify_product_id, stock_status, stock
-       FROM suprides_products
-       WHERE shopify_product_id IS NOT NULL`
-    ).all() as { sku: string; shopify_product_id: number; stock_status: string | null; stock: number | null }[])
-      .filter(r => byId.has(r.shopify_product_id));
-
-    if (rows.length === 0) {
-      return res.json({ message: 'Nenhum produto sincronizado ao Shopify', updated: 0, errors: [] });
-    }
-
-    let updated = 0;
-    const errors: { sku: string; error: unknown }[] = [];
-
-    const processOne = async (r: typeof rows[number]) => {
-      const cur = byId.get(r.shopify_product_id)!;
-      const stockStatus = r.stock_status || parseStockStatus(r.stock != null ? String(r.stock) : undefined);
-      const status = stockStatus === 'sem_stock' ? 'DRAFT' : 'ACTIVE';
-      const label = formatStockStatusLabel(stockStatus as StockStatus);
-      const input: Record<string, unknown> = {};
-      if (cur.status !== status) input.status = status;
-      if ((cur.stockStatus ?? '') !== label) {
-        input.metafields = [{ namespace: 'custom', key: 'stock_status', value: label, type: 'single_line_text_field' }];
-      }
-      if (!Object.keys(input).length) return;
-      await productUpdate(r.shopify_product_id, input);
-      if (status === 'ACTIVE' && !cur.publishedAt) await publishProduct(r.shopify_product_id);
-      updated++;
-    };
-
-    const CONCURRENCY = 5;
-    const queue = [...rows];
-    await Promise.all(
-      Array.from({ length: CONCURRENCY }, async () => {
-        while (true) {
-          const r = queue.shift();
-          if (!r) break;
-          try {
-            await processOne(r);
-          } catch (e: any) {
-            errors.push({ sku: r.sku, error: e?.response?.data || e?.message || String(e) });
-          }
-        }
-      })
-    );
-
-    res.json({ message: `Stock sincronizado: ${updated} produtos alterados`, updated, errors });
+    res.json(await withCatalogueLock(syncStock));
   } catch (err: any) {
-    res.status(500).json({ error: 'Erro ao sincronizar stock', detail: err.message });
+    res.status(err.code === 'BUSY' ? 409 : 500).json({ error: 'Erro ao sincronizar stock', detail: err.message });
   } finally {
     fullSyncRunning = false;
   }

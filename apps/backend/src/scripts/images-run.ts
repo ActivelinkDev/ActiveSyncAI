@@ -9,10 +9,10 @@
  * Os ativos vão sempre primeiro. Não correr ao mesmo tempo que um sync.
  */
 import "dotenv/config";
-import { ensureSupridesTable } from "../db/migrate-suprides";
-import { getSqlite } from "../db/sqlite";
+import { withConnectionSettings } from "../suprides/repositories/store";
+import { closeMssql } from "../db/mssql";
 import { readAllProducts } from "../suprides/api/shopify-read";
-import { runImagesSync, type ImageTarget } from "../services/images-sync";
+import { runImagesSync, loadImageRows, type ImageTarget } from "../services/images-sync";
 
 const ts = () => new Date().toLocaleTimeString("pt-PT");
 const arg = (name: string) => {
@@ -25,18 +25,14 @@ async function main() {
   const onlyActive = process.argv.includes("--active");
   const limit = Number(arg("--limit") || 0);
   const recheck = process.argv.includes("--recheck");
-  ensureSupridesTable();
 
   console.log(`${ts()} — a ler a loja…`);
   const status = new Map((await readAllProducts()).map(p => [p.productId, p.status]));
-  const rows = getSqlite().prepare(
-    `SELECT sku, shopify_product_id AS id, images FROM suprides_products
-     WHERE shopify_product_id IS NOT NULL AND images IS NOT NULL${recheck ? "" : " AND images_synced = 0"}`
-  ).all() as { sku: string; id: number; images: string }[];
+  const rows = (await loadImageRows()).filter(r => r.images && (recheck || r.images_synced === 0));
 
   let targets: (ImageTarget & { active: boolean })[] = rows
-    .filter(r => status.has(r.id))
-    .map(r => ({ sku: r.sku, productId: r.id, urls: JSON.parse(r.images) as string[], active: status.get(r.id) === "ACTIVE" }))
+    .filter(r => status.has(r.shopify_product_id!))
+    .map(r => ({ sku: r.sku, productId: r.shopify_product_id!, urls: JSON.parse(r.images!) as string[], active: status.get(r.shopify_product_id!) === "ACTIVE" }))
     .filter(t => t.urls.length > 0)
     .sort((a, b) => Number(b.active) - Number(a.active));
   if (onlyActive) targets = targets.filter(t => t.active);
@@ -49,4 +45,4 @@ async function main() {
   console.log(`${ts()} — fim`);
 }
 
-main().catch(e => { console.error("ERRO:", e?.message ?? e); process.exit(1); });
+withConnectionSettings(main).catch(e => { console.error("ERRO:", e?.message ?? e); process.exitCode = 1; }).finally(closeMssql);

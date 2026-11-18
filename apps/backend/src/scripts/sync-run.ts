@@ -2,6 +2,7 @@
  * Sync completo fora da app (consola), com cópia antes/depois e verificação.
  *
  *   npm run sync:run -- --dry-run          simulação; grava o plano em data/plans/
+ *   npm run sync:run -- --dry-run --snapshot <ficheiro>   simulação com uma cópia local da loja
  *   npm run sync:run                       sync real → cópia da loja depois → sync:verify com o último plano
  *   npm run sync:run -- --resume           retoma uma execução interrompida (salta os SKUs já enviados)
  *   --no-images                            não envia imagens (ficam por enviar para um envio à parte)
@@ -9,11 +10,12 @@
  * Não correr ao mesmo tempo que um sync lançado pela app.
  */
 import "dotenv/config";
+import { withConnectionSettings } from "../suprides/repositories/store";
 import fs from "fs";
 import path from "path";
-import { ensureSupridesTable, ensureSupridesTagTables } from "../db/migrate-suprides";
+import { closeMssql } from "../db/mssql";
 import { runFullShopifySync } from "../suprides/routes/sync";
-import { takeSnapshot } from "../services/shopify-snapshot";
+import { loadSnapshot, takeSnapshot } from "../services/shopify-snapshot";
 import { verifyPlan } from "../services/sync-verify";
 import { sendAlert } from "../services/alerts";
 import { recordShopPrices } from "../services/price-history";
@@ -36,11 +38,16 @@ async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const resume = process.argv.includes("--resume");
   const skipImages = process.argv.includes("--no-images");
-  ensureSupridesTable();
-  ensureSupridesTagTables();
+  const snapshotIndex = process.argv.indexOf("--snapshot");
+  const snapshotFile = snapshotIndex >= 0 ? process.argv[snapshotIndex + 1] : undefined;
+  if (snapshotIndex >= 0 && (!dryRun || !snapshotFile || snapshotFile.startsWith("--"))) {
+    throw new Error("--snapshot exige --dry-run e o nome do ficheiro da cópia da loja.");
+  }
 
   console.log(`${ts()} — início (${dryRun ? "simulação" : resume ? "retomar" : "sync real"})`);
-  const r: any = await runFullShopifySync({ dryRun, resume, skipImages });
+  const r: any = await runFullShopifySync({ dryRun, resume, skipImages,
+    readShop: snapshotFile ? async () => loadSnapshot(snapshotFile).products : undefined,
+  });
 
   if (dryRun) {
     const dir = dataPath("plans");
@@ -100,10 +107,10 @@ Relatório no servidor: ${path.basename(out)}`);
   console.log(`${ts()} — fim. Relatório: ${out}`);
 }
 
-main().catch(async e => {
+withConnectionSettings(main).catch(async e => {
   console.error(`${ts()} — ERRO:`, e?.response?.data ?? e?.message ?? e);
-  await sendAlert("sync-failed", "Sync manual FALHOU", `O sync parou com erro: ${e?.message ?? e}
+  if (!process.argv.includes("--dry-run")) await sendAlert("sync-failed", "Sync manual FALHOU", `O sync parou com erro: ${e?.message ?? e}
 
 Retomar com --resume.`);
-  process.exit(1);
-});
+  process.exitCode = 1;
+}).finally(closeMssql);
