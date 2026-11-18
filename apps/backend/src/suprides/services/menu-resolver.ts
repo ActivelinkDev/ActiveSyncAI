@@ -1,6 +1,7 @@
 import { loadPublicMenu, loadShopifyCollectionMapping } from '../repositories/store';
-import { getSqlite } from '../../db/sqlite';
-import type { MenuNode, ShopifyCollectionMapping } from '../types';
+import { sql } from 'kysely';
+import { getMssql } from '../../db/mssql';
+import type { MenuNode } from '../types';
 
 export interface FlatMenuNode {
   shopifyId: string;
@@ -23,11 +24,10 @@ interface NodeIndex {
   l2l1ByLine: Map<string, Set<string>>;
 }
 
-let _index: NodeIndex | null = null;
+let pendingIndex: Promise<NodeIndex> | null = null;
 
-function buildIndex(): NodeIndex {
-  const menu = loadPublicMenu();
-  const mapping: ShopifyCollectionMapping = loadShopifyCollectionMapping();
+async function buildIndex(): Promise<NodeIndex> {
+  const [menu, mapping] = await Promise.all([loadPublicMenu(), loadShopifyCollectionMapping()]);
 
   const flat: FlatMenuNode[] = [];
   const byId = new Map<string, FlatMenuNode>();
@@ -73,14 +73,17 @@ function buildIndex(): NodeIndex {
   return { flat, byId, l3ByFamily, l2l1ByLine };
 }
 
-function getIndex(): NodeIndex {
-  if (!_index) _index = buildIndex();
-  return _index;
+function getIndex(): Promise<NodeIndex> {
+  if (!pendingIndex) {
+    const request = buildIndex().finally(() => { if (pendingIndex === request) pendingIndex = null; });
+    pendingIndex = request;
+  }
+  return pendingIndex;
 }
 
 /** Invalida o cache do índice — chamar após recarregar o menu ou o mapping */
 export function invalidateMenuIndex(): void {
-  _index = null;
+  pendingIndex = null;
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -88,8 +91,8 @@ export function invalidateMenuIndex(): void {
 /**
  * Devolve a árvore flat de nós do menu público.
  */
-export function getAllNodes(): FlatMenuNode[] {
-  return getIndex().flat;
+export async function getAllNodes(): Promise<FlatMenuNode[]> {
+  return (await getIndex()).flat;
 }
 
 /**
@@ -97,8 +100,7 @@ export function getAllNodes(): FlatMenuNode[] {
  * Prioridade: L3 (via family) > L2 (via product_line) > L1 (via product_line).
  * Devolve null se não houver mapeamento.
  */
-export function resolveNodeForProduct(product_line: string | undefined, family: string | undefined): string | null {
-  const idx = getIndex();
+function resolveNode(idx: NodeIndex, product_line: string | undefined, family: string | undefined): string | null {
   const pl = (product_line ?? '').trim();
   const fam = (family ?? '').trim();
 
@@ -132,8 +134,8 @@ export function resolveNodeForProduct(product_line: string | undefined, family: 
  * Devolve os ancestrais de um nó do mais geral para o mais específico,
  * incluindo o próprio nó no final: [L1, L2?, L3?]
  */
-export function getAncestors(shopifyId: string): string[] {
-  const idx = getIndex();
+export async function getAncestors(shopifyId: string): Promise<string[]> {
+  const idx = await getIndex();
   const node = idx.byId.get(shopifyId);
   if (!node) return [];
 
@@ -147,8 +149,8 @@ export function getAncestors(shopifyId: string): string[] {
 /**
  * Devolve todos os descendentes de um nó (filhos, netos), incluindo o próprio.
  */
-export function getDescendants(shopifyId: string): string[] {
-  const idx = getIndex();
+export async function getDescendants(shopifyId: string): Promise<string[]> {
+  const idx = await getIndex();
   const result: string[] = [];
 
   function collect(id: string) {
@@ -162,58 +164,53 @@ export function getDescendants(shopifyId: string): string[] {
   return result;
 }
 
-/**
- * Conta quantos produtos na BD estão mapeados a um nó de menu específico
- * (inclui descendentes).
- */
-export function getProductCount(shopifyId: string): number {
-  const ids = getDescendants(shopifyId);
-  if (!ids.length) return 0;
-
-  const db = getSqlite();
-  const placeholders = ids.map(() => '?').join(',');
-  const row = db.prepare(
-    `SELECT COUNT(*) as cnt FROM suprides_products WHERE shopify_node_id IN (${placeholders})`
-  ).get(...ids) as { cnt: number };
-
-  return row?.cnt ?? 0;
+export async function getProductsForMenuNode(shopifyId: string, directOnly: boolean): Promise<{ sku: string; name: string | null }[]> {
+  const ids = directOnly ? [shopifyId] : await getDescendants(shopifyId);
+  const { rows } = await sql<{ sku: string; name: string | null }>`
+    SELECT sku, name FROM products WHERE supplier = 'suprides' AND shopify_node_id IN
+      (SELECT value FROM OPENJSON(${JSON.stringify(ids)})) ORDER BY name, sku`.execute(getMssql());
+  return rows;
 }
 
-/**
- * Conta apenas os produtos directamente mapeados a este nó (sem descendentes).
- */
-export function getDirectProductCount(shopifyId: string): number {
-  const db = getSqlite();
-  const row = db.prepare(
-    `SELECT COUNT(*) as cnt FROM suprides_products WHERE shopify_node_id = ?`
-  ).get(shopifyId) as { cnt: number };
-  return row?.cnt ?? 0;
-}
-
-/**
- * Reconstrói o shopify_node_id de todos os produtos na BD.
- * Deve ser chamado após sync de produtos ou alteração do mapping.
- */
-export function rebuildProductNodeIds(): { updated: number } {
-  const db = getSqlite();
-  invalidateMenuIndex();
-
-  const products = db.prepare(
-    `SELECT sku, product_line, family FROM suprides_products`
-  ).all() as { sku: string; product_line: string | null; family: string | null }[];
-
-  const stmt = db.prepare(`UPDATE suprides_products SET shopify_node_id = ? WHERE sku = ?`);
-
-  const update = db.transaction(() => {
-    let updated = 0;
-    for (const p of products) {
-      const nodeId = resolveNodeForProduct(p.product_line ?? undefined, p.family ?? undefined);
-      stmt.run(nodeId, p.sku);
-      if (nodeId) updated++;
+/** Conta numa única passagem pela BD, incluindo os produtos dos descendentes. */
+export async function getMenuWithProductCounts() {
+  const [nodes, counts] = await Promise.all([
+    getAllNodes(),
+    getMssql().selectFrom("products").where("supplier", "=", "suprides")
+      .where("shopify_node_id", "is not", null).groupBy("shopify_node_id")
+      .select(["shopify_node_id", sql<number>`COUNT(*)`.as("n")]).execute(),
+  ]);
+  const direct = new Map(counts.map(row => [row.shopify_node_id, row.n]));
+  const total = new Map(direct);
+  // Os pais precedem sempre os filhos na travessia do menu.
+  for (const node of [...nodes].reverse()) {
+    if (node.parentId) {
+      total.set(node.parentId, (total.get(node.parentId) ?? 0) + (total.get(node.shopifyId) ?? 0));
     }
-    return updated;
-  });
+  }
+  return nodes.map(node => ({
+    ...node, directProductCount: direct.get(node.shopifyId) ?? 0, productCount: total.get(node.shopifyId) ?? 0,
+  }));
+}
 
-  const updated = update();
-  return { updated };
+export async function rebuildProductNodeIds(): Promise<{ updated: number }> {
+  const index = await getIndex();
+  return getMssql().transaction().setIsolationLevel("serializable").execute(async trx => {
+    const products = await trx.selectFrom("products").where("supplier", "=", "suprides")
+      .select(["id", "product_line", "family", "shopify_node_id"]).execute();
+    let updated = 0;
+    const changed: { id: number; node: string | null }[] = [];
+    for (const p of products) {
+      const node = resolveNode(index, p.product_line, p.family);
+      if (node) updated++;
+      if (node !== p.shopify_node_id) changed.push({ id: p.id, node });
+    }
+    for (let i = 0; i < changed.length; i += 1000) {
+      await sql`UPDATE p SET shopify_node_id = changes.node FROM products p
+        JOIN OPENJSON(${JSON.stringify(changed.slice(i, i + 1000))})
+          WITH (id int, node nvarchar(100)) changes ON changes.id = p.id
+        WHERE p.supplier = 'suprides'`.execute(trx);
+    }
+    return { updated };
+  });
 }

@@ -1,62 +1,28 @@
-import { getProducts } from '../api/suprides-api';
-import { isCacheValid, getCachedProducts, setCache, getFetchingPromise, setFetchingPromise } from '../repositories/store';
-import { getAllProducts as getSqliteProducts, countProducts } from '../../repositories/suprides-cache';
+import { getAllProducts as readProducts } from '../../repositories/suprides-cache';
 import type { SupridesProduct, FamiliaTree } from '../types';
 
-export async function getAllProducts(force = false): Promise<SupridesProduct[]> {
-  // usa SQLite se tiver dados
-  const sqliteCount = countProducts();
-  if (sqliteCount > 0) {
-    const rows = getSqliteProducts(100_000);
-    return rows.map(r => ({
-      sku:               r.sku,
-      name:              r.name              ?? '',
-      ean:               r.ean               ?? undefined,
-      brand:             r.brand             ?? undefined,
-      product_line:      r.product_line      ?? undefined,
-      family:            r.family            ?? undefined,
-      sub_family:        r.sub_family        ?? undefined,
-      price:             r.price             != null ? String(r.price)  : undefined,
-      pvpr:              r.pvpr              != null ? String(r.pvpr)   : undefined,
-      stock:             r.stock             != null ? String(r.stock)  : undefined,
-      stock_status:      r.stock_status      ?? undefined,
-      images:            r.images            ? JSON.parse(r.images)     : undefined,
-      description:       r.description       ?? undefined,
-      short_description: r.short_description ?? undefined,
-      cor:               r.cor               ?? undefined,
-      weight:            r.weight            != null ? r.weight         : undefined,
-      part_number:       r.part_number       ?? undefined,
-      manufacturer:      r.manufacturer      ?? undefined,
-    })) as SupridesProduct[];
-  }
-
-  // fallback: cache JSON em disco (comportamento anterior)
-  if (!force && isCacheValid()) return getCachedProducts().products!;
-
-  const existing = getFetchingPromise();
-  if (existing) return existing;
-
-  const promise = (async () => {
-    const all: SupridesProduct[] = [];
-    let page = 1;
-    while (true) {
-      const batch = await getProducts(page, 100);
-      if (!Array.isArray(batch) || batch.length === 0) break;
-      all.push(...batch);
-      if (batch.length < 100) break;
-      page++;
-    }
-    setCache(all);
-    setFetchingPromise(null);
-    console.log(`[Suprides] Cache atualizado: ${all.length} produtos`);
-    return all;
-  })().catch(err => {
-    setFetchingPromise(null);
-    throw err;
-  });
-
-  setFetchingPromise(promise);
-  return promise;
+export async function getAllProducts(_force = false): Promise<SupridesProduct[]> {
+  const rows = await readProducts(2147483647);
+  return rows.map(r => ({
+    sku:               r.sku,
+    name:              r.name              ?? '',
+    ean:               r.ean               ?? undefined,
+    brand:             r.brand             ?? undefined,
+    product_line:      r.product_line      ?? undefined,
+    family:            r.family            ?? undefined,
+    sub_family:        r.sub_family        ?? undefined,
+    price:             r.price             != null ? String(r.price)  : undefined,
+    pvpr:              r.pvpr              != null ? String(r.pvpr)   : undefined,
+    stock:             r.stock             != null ? String(r.stock)  : undefined,
+    stock_status:      r.stock_status      ?? undefined,
+    images:            r.images            ? JSON.parse(r.images)     : undefined,
+    description:       r.description       ?? undefined,
+    short_description: r.short_description ?? undefined,
+    cor:               r.cor               ?? undefined,
+    weight:            r.weight            != null ? r.weight         : undefined,
+    part_number:       r.part_number       ?? undefined,
+    manufacturer:      r.manufacturer      ?? undefined,
+  })) as SupridesProduct[];
 }
 
 export function buildFamiliasFromProducts(all: SupridesProduct[]): FamiliaTree[] {

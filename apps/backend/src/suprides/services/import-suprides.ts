@@ -1,5 +1,5 @@
 import {
-  upsertProductsBatch, countProducts, countActiveProducts, markMissingAsRemoved, SupridesProduct,
+  upsertProductsBatch, countProducts, countActiveProducts, markMissingAsRemoved, withCatalogueLock, SupridesProduct,
 } from "../../repositories/suprides-cache";
 import { getProducts, parseStock, parseStockStatus } from "../api/suprides-api";
 import { normalizeMoney } from "./price-calc";
@@ -95,7 +95,7 @@ async function fetchPageWithRetry(page: number, fetchPage: PageFetcher = getProd
 }
 
 /**
- * Importa o catálogo completo da API Suprides para o SQLite.
+ * Importa o catálogo completo da API Suprides para o SQL Server.
  * - Uma página que falhe (após retries) aborta a importação: os produtos já gravados
  *   ficam atualizados, mas nada é marcado como retirado.
  * - SKUs ausentes são marcados como retirados (sem stock), nunca apagados.
@@ -114,9 +114,18 @@ export async function runSupridesImport(
   };
 
   try {
+    return await withCatalogueLock(importCatalogue);
+  } catch (err: any) {
+    say({ type: "error", message: err?.message ?? "Erro desconhecido na importação" });
+    throw err;
+  } finally {
+    importRunning = false;
+  }
+
+  async function importCatalogue() {
     say({ type: "start", message: "A iniciar importação da API Suprides…" });
 
-    const activeBefore = countActiveProducts();
+    const activeBefore = await countActiveProducts();
     const seenSkus = new Set<string>();
     let waveStart = 1;
     let totalSaved = 0;
@@ -141,7 +150,7 @@ export async function runSupridesImport(
       }
 
       if (waveMapped.length > 0) {
-        upsertProductsBatch(waveMapped);
+        await upsertProductsBatch(waveMapped);
         waveMapped.forEach(p => seenSkus.add(p.sku));
         totalSaved += waveMapped.length;
         say({ type: "log", saved: totalSaved, message: `Guardados ${waveMapped.length} produtos (total: ${totalSaved})` });
@@ -161,14 +170,14 @@ export async function runSupridesImport(
                  `Nenhum produto foi marcado como retirado. Se o catálogo encolheu mesmo, repetir com ?allowLargeRemoval=1.`,
       });
     } else {
-      removed = markMissingAsRemoved(seenSkus);
+      removed = await markMissingAsRemoved(seenSkus);
       if (removed > 0) say({ type: "log", message: `${removed} produtos deixaram de vir na API: marcados como retirados (sem stock).` });
     }
 
-    const total = countProducts();
-    const publicMenu = loadPublicMenu();
+    const total = await countProducts();
+    const publicMenu = await loadPublicMenu();
     if (publicMenu.nodes && publicMenu.nodes.length > 0) {
-      const { updated } = rebuildProductNodeIds();
+      const { updated } = await rebuildProductNodeIds();
       say({ type: "log", message: `Node IDs reconstruídos: ${updated} produtos mapeados ao menu.` });
     } else {
       say({ type: "log", message: "Menu público vazio — shopify_node_id não reconstruído (corre Sync Shopify)." });
@@ -176,10 +185,5 @@ export async function runSupridesImport(
 
     say({ type: "done", inserted: totalSaved, total, removed, message: `Concluído — ${totalSaved} produtos importados.` });
     return { saved: totalSaved, total, removed, removalSkipped };
-  } catch (err: any) {
-    say({ type: "error", message: err?.message ?? "Erro desconhecido na importação" });
-    throw err;
-  } finally {
-    importRunning = false;
   }
 }
