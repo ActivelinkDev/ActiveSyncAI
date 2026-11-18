@@ -230,17 +230,21 @@ export async function fetchProductsInCollection(collectionId: number): Promise<{
 
 // ── Imagens (media) ───────────────────────────────────────────────────────────
 
-export interface ShopifyImage { id: number; src: string; position?: number }
+export interface ShopifyImage {
+  id: number; src: string; position?: number;
+  /** UPLOADED | PROCESSING | READY | FAILED */
+  status?: string;
+}
 
-/** Imagens (MediaImage) de um produto, por ordem. */
+/** Imagens (MediaImage) de um produto, por ordem, com o estado do processamento. */
 export async function getProductImages(productId: number): Promise<ShopifyImage[]> {
   const data = await graphql(
-    `query($id: ID!) { product(id: $id) { media(first: 100) { nodes { id mediaContentType ... on MediaImage { image { url } originalSource { url } } } } } }`,
+    `query($id: ID!) { product(id: $id) { media(first: 100) { nodes { id status mediaContentType ... on MediaImage { image { url } originalSource { url } } } } } }`,
     { id: gid('Product', productId) },
   );
   return (data?.product?.media?.nodes || [])
     .filter((m: any) => m.mediaContentType === 'IMAGE')
-    .map((m: any, i: number) => ({ id: numId(m.id), src: m.originalSource?.url || m.image?.url || '', position: i + 1 }));
+    .map((m: any, i: number) => ({ id: numId(m.id), src: m.originalSource?.url || m.image?.url || '', position: i + 1, status: m.status }));
 }
 
 /** Acrescenta imagens a um produto (a Shopify descarrega-as de forma assíncrona). */
@@ -266,15 +270,20 @@ export async function deleteProductImage(productId: number, imageId: number): Pr
 }
 
 /**
- * Chave de comparação de imagens pelo nome de ficheiro. A Shopify passa a imagem para o
- * CDN dela e acrescenta "_<uuid>" ao nome ("x_product_image_0_a6df69d6-….jpg"): retira-se
- * esse sufixo para comparar com o URL original.
+ * Chave de comparação de imagens pelo nome de ficheiro.
+ * - A Shopify acrescenta "_<uuid>" ao nome quando copia a imagem para o CDN dela.
+ * - A Suprides muda o prefixo hexadecimal a cada exportação ("69749f02dbb0b_product_image_0.jpg"
+ *   passa a "6a48ff029c45c_product_image_0.jpeg") e por vezes a extensão.
+ * Fica a parte estável ("product_image_0"); a mesma posição conta como a mesma foto.
  */
 export function imageKeyFromUrl(url: string): string {
   try {
     const clean = String(url).split('?')[0].split('#')[0];
     const base = decodeURIComponent(clean.substring(clean.lastIndexOf('/') + 1)).toLowerCase();
-    return base.replace(/_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\.[a-z0-9]+$)/, '');
+    return base
+      .replace(/_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\.[a-z0-9]+$)/, '')
+      .replace(/^[0-9a-f]{10,16}_/, '')
+      .replace(/\.(jpe?g|png|webp|gif)$/, '');
   } catch {
     return String(url).toLowerCase();
   }
@@ -307,21 +316,35 @@ export async function reconcileProductImages(
   return { added, missing: missing.length, total: current.length + added, complete: added === missing.length };
 }
 
-/** Remove imagens duplicadas (mesmo filename), mantendo a primeira. */
-export async function dedupeProductImages(productId: number): Promise<{ kept: number; removed: number; removedIds: number[] }> {
-  const current = await getProductImages(productId);
+/** Imagens duplicadas de um produto (mesma foto), mantendo a primeira por ordem. Puro. */
+export function findDuplicateImages(current: ShopifyImage[]): { keep: ShopifyImage[]; duplicates: ShopifyImage[] } {
   const seen = new Set<string>();
-  const removedIds: number[] = [];
+  const keep: ShopifyImage[] = [];
+  const duplicates: ShopifyImage[] = [];
   for (const img of current) {
     const key = imageKeyFromUrl(img.src || '');
-    if (seen.has(key)) {
-      await deleteProductImage(productId, img.id);
-      removedIds.push(img.id);
-    } else {
-      seen.add(key);
-    }
+    if (seen.has(key)) duplicates.push(img);
+    else { seen.add(key); keep.push(img); }
   }
-  return { kept: seen.size, removed: removedIds.length, removedIds };
+  return { keep, duplicates };
+}
+
+/** Apaga ficheiros de imagem (do produto e da biblioteca de ficheiros da loja). */
+export async function deleteImageFiles(imageIds: number[]): Promise<void> {
+  for (let i = 0; i < imageIds.length; i += 50) {
+    const data = await graphql(
+      `mutation($ids: [ID!]!) { fileDelete(fileIds: $ids) { deletedFileIds userErrors { field message } } }`,
+      { ids: imageIds.slice(i, i + 50).map(id => gid('MediaImage', id)) },
+    );
+    throwUserErrors('fileDelete', data?.fileDelete);
+  }
+}
+
+/** Remove as imagens duplicadas de um produto, mantendo a primeira cópia de cada foto. */
+export async function dedupeProductImages(productId: number): Promise<{ kept: number; removed: number; removedIds: number[] }> {
+  const { keep, duplicates } = findDuplicateImages(await getProductImages(productId));
+  if (duplicates.length) await deleteImageFiles(duplicates.map(d => d.id));
+  return { kept: keep.length, removed: duplicates.length, removedIds: duplicates.map(d => d.id) };
 }
 
 export async function fetchAllCollections(): Promise<Map<string, string>> {

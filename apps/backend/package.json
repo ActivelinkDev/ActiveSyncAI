@@ -11,7 +11,8 @@
     "shopify:restore": "ts-node-dev --transpile-only --exit-child src/scripts/shopify-restore.ts",
     "sync:verify": "ts-node-dev --transpile-only --exit-child src/scripts/sync-verify.ts",
     "test": "node --require ts-node/register/transpile-only --test \"src/**/*.test.ts\"",
-    "sync:run": "ts-node --transpile-only src/scripts/sync-run.ts"
+    "sync:run": "ts-node --transpile-only src/scripts/sync-run.ts",
+    "images:run": "ts-node --transpile-only src/scripts/images-run.ts"
   },
   "description": "MEGADIGITAL API Server",
   "author": "Pedro Azevedo / Activelink",
