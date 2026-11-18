@@ -342,9 +342,17 @@ export async function deleteImageFiles(imageIds: number[]): Promise<void> {
 
 /** Remove as imagens duplicadas de um produto, mantendo a primeira cópia de cada foto. */
 export async function dedupeProductImages(productId: number): Promise<{ kept: number; removed: number; removedIds: number[] }> {
-  const { keep, duplicates } = findDuplicateImages(await getProductImages(productId));
-  if (duplicates.length) await deleteImageFiles(duplicates.map(d => d.id));
-  return { kept: keep.length, removed: duplicates.length, removedIds: duplicates.map(d => d.id) };
+  // A leitura vê 100 imagens de cada vez: repete até não haver duplicados.
+  const removedIds: number[] = [];
+  let kept = 0;
+  for (let pass = 0; pass < 20; pass++) {
+    const { keep, duplicates } = findDuplicateImages(await getProductImages(productId));
+    kept = keep.length;
+    if (!duplicates.length) break;
+    await deleteImageFiles(duplicates.map(d => d.id));
+    removedIds.push(...duplicates.map(d => d.id));
+  }
+  return { kept, removed: removedIds.length, removedIds };
 }
 
 export async function fetchAllCollections(): Promise<Map<string, string>> {
