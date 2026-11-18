@@ -11,7 +11,7 @@ test('todas já na loja e prontas → completo, nada a enviar', () => {
     { id: 1, src: CDN + 'x_0' + uuid + '.jpg', status: 'READY' },
     { id: 2, src: CDN + 'x_1' + uuid + '.jpg', status: 'READY' },
   ]);
-  assert.deepEqual(p, { add: [], removeFailed: [], complete: true });
+  assert.deepEqual(p, { add: [], removeFailed: [], removePlaceholders: [], complete: true });
 });
 
 test('falta uma → envia só essa', () => {
@@ -37,14 +37,14 @@ test('URLs repetidos na Suprides contam uma vez; imagens extra na loja ficam', (
     { id: 1, src: CDN + 'x_0' + uuid + '.jpg', status: 'READY' },
     { id: 2, src: CDN + 'outra.jpg', status: 'READY' },
   ]);
-  assert.deepEqual(p, { add: [], removeFailed: [], complete: true });
+  assert.deepEqual(p, { add: [], removeFailed: [], removePlaceholders: [], complete: true });
 });
 
 test('a mesma foto com outro prefixo da Suprides e outra extensão conta como presente', () => {
   const p = planImages([SRC + '6a48ff029c45c_product_image_0.jpeg'], [
     { id: 1, src: CDN + '69749f02dbb0b_product_image_0' + uuid + '.jpg', status: 'READY' },
   ]);
-  assert.deepEqual(p, { add: [], removeFailed: [], complete: true });
+  assert.deepEqual(p, { add: [], removeFailed: [], removePlaceholders: [], complete: true });
 });
 
 test('duplicados: fica a primeira cópia de cada foto, pela ordem', async () => {
@@ -53,4 +53,35 @@ test('duplicados: fica a primeira cópia de cada foto, pela ordem', async () => 
   const r = findDuplicateImages([img(1, 'aaaaaaaaaaaaa', 0), img(2, 'aaaaaaaaaaaaa', 1), img(3, 'bbbbbbbbbbbbb', 0), img(4, 'bbbbbbbbbbbbb', 1)]);
   assert.deepEqual(r.keep.map(i => i.id), [1, 2]);
   assert.deepEqual(r.duplicates.map(i => i.id), [3, 4]);
+});
+
+test('ícone genérico da Suprides guardado na loja → apaga e volta a pedir a foto', () => {
+  const p = planImages([SRC + 'x_product_image_0.jpg', SRC + 'x_product_image_1.jpg'], [
+    { id: 1, src: CDN + 'x_product_image_0' + uuid + '.jpg', status: 'READY', width: 262, height: 262, fileSize: 1692 },
+    { id: 2, src: CDN + 'x_product_image_1' + uuid + '.jpg', status: 'READY', width: 800, height: 800, fileSize: 26081 },
+  ]);
+  assert.deepEqual(p.removePlaceholders, [1]);
+  assert.deepEqual(p.add, [SRC + 'x_product_image_0.jpg']);
+  assert.equal(p.complete, false);
+});
+
+test('foto verdadeira com 262×262 mas pesada não é confundida com o ícone', () => {
+  const p = planImages([SRC + 'x_0.jpg'], [{ id: 1, src: CDN + 'x_0' + uuid + '.jpg', status: 'READY', width: 262, height: 262, fileSize: 30000 }]);
+  assert.deepEqual(p.removePlaceholders, []);
+  assert.equal(p.complete, true);
+});
+
+test('dimensões de JPEG e PNG; ícone reconhecido pelos bytes', async () => {
+  const { imageDimensions, isPlaceholderBytes } = await import('./images-sync');
+  const jpeg = (w: number, h: number, size: number) => {
+    const b = Buffer.alloc(size);
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0, 0, 0xff, 0xc0, 0x00, 0x11, 0x08, h >> 8, h & 255, w >> 8, w & 255]).copy(b);
+    return b;
+  };
+  assert.deepEqual(imageDimensions(jpeg(800, 600, 100)), { width: 800, height: 600 });
+  const png = Buffer.alloc(40); png.writeUInt32BE(0x89504e47, 0); png.writeUInt32BE(640, 16); png.writeUInt32BE(480, 20);
+  assert.deepEqual(imageDimensions(png), { width: 640, height: 480 });
+  assert.equal(isPlaceholderBytes(jpeg(262, 262, 1692)), true);
+  assert.equal(isPlaceholderBytes(jpeg(262, 262, 20000)), false);
+  assert.equal(isPlaceholderBytes(jpeg(800, 800, 1500)), false);
 });

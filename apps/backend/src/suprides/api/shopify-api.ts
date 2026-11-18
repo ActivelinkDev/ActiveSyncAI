@@ -234,17 +234,31 @@ export interface ShopifyImage {
   id: number; src: string; position?: number;
   /** UPLOADED | PROCESSING | READY | FAILED */
   status?: string;
+  width?: number; height?: number; fileSize?: number;
+}
+
+/**
+ * Ícone genérico do site da Suprides (Magento), servido no lugar da foto quando esta ainda
+ * não existe: 262×262, ~1,3–1,7 KB. A Shopify guarda-o como se fosse a foto do produto.
+ */
+export const PLACEHOLDER_SIZE = 262;
+export function isPlaceholderImage(img: { width?: number; height?: number; fileSize?: number }): boolean {
+  return img.width === PLACEHOLDER_SIZE && img.height === PLACEHOLDER_SIZE && (img.fileSize == null || img.fileSize < 4000);
 }
 
 /** Imagens (MediaImage) de um produto, por ordem, com o estado do processamento. */
 export async function getProductImages(productId: number): Promise<ShopifyImage[]> {
   const data = await graphql(
-    `query($id: ID!) { product(id: $id) { media(first: 100) { nodes { id status mediaContentType ... on MediaImage { image { url } originalSource { url } } } } } }`,
+    `query($id: ID!) { product(id: $id) { media(first: 100) { nodes { id status mediaContentType ... on MediaImage { image { url width height } originalSource { url fileSize } } } } } }`,
     { id: gid('Product', productId) },
   );
   return (data?.product?.media?.nodes || [])
     .filter((m: any) => m.mediaContentType === 'IMAGE')
-    .map((m: any, i: number) => ({ id: numId(m.id), src: m.originalSource?.url || m.image?.url || '', position: i + 1, status: m.status }));
+    .map((m: any, i: number) => ({
+      id: numId(m.id), src: m.originalSource?.url || m.image?.url || '', position: i + 1, status: m.status,
+      width: m.image?.width ?? undefined, height: m.image?.height ?? undefined,
+      fileSize: m.originalSource?.fileSize != null ? Number(m.originalSource.fileSize) : undefined,
+    }));
 }
 
 /** Acrescenta imagens a um produto (a Shopify descarrega-as de forma assíncrona). */

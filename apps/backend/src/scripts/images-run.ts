@@ -4,6 +4,7 @@
  *   npm run images:run -- --dry-run           só conta o que falta
  *   npm run images:run -- --active --limit 20 só produtos ativos, no máximo 20
  *   npm run images:run                        todos os produtos com imagens por confirmar
+ *   npm run images:run -- --recheck           revê também os já marcados (ex.: ícones genéricos da Suprides)
  *
  * Os ativos vão sempre primeiro. Não correr ao mesmo tempo que um sync.
  */
@@ -23,13 +24,14 @@ async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const onlyActive = process.argv.includes("--active");
   const limit = Number(arg("--limit") || 0);
+  const recheck = process.argv.includes("--recheck");
   ensureSupridesTable();
 
   console.log(`${ts()} — a ler a loja…`);
   const status = new Map((await readAllProducts()).map(p => [p.productId, p.status]));
   const rows = getSqlite().prepare(
     `SELECT sku, shopify_product_id AS id, images FROM suprides_products
-     WHERE shopify_product_id IS NOT NULL AND images_synced = 0 AND images IS NOT NULL`
+     WHERE shopify_product_id IS NOT NULL AND images IS NOT NULL${recheck ? "" : " AND images_synced = 0"}`
   ).all() as { sku: string; id: number; images: string }[];
 
   let targets: (ImageTarget & { active: boolean })[] = rows

@@ -2,14 +2,14 @@ import { Router, Request, Response } from 'express';
 import { getSqlite } from '../../db/sqlite';
 import {
   getProductImages,
-  addProductImage,
-  deleteProductImage,
+  addProductImages,
+  deleteImageFiles,
   dedupeProductImages,
   imageKeyFromUrl,
   resetSyncAbort,
   abortSync,
-  type ShopifyImage,
 } from '../api/shopify-api';
+import { sendProductImages, checkSourceImage } from '../../services/images-sync';
 
 const router = Router();
 
@@ -169,104 +169,38 @@ router.post('/', async (req: Request, res: Response) => {
         if (!task) break;
         const { sku, productId, urls } = task;
         try {
-          if (mode === 'verify') {
-            const current: ShopifyImage[] = await getProductImages(productId);
-            const currentSrcs = new Set(current.map(i => imageKeyFromUrl(i.src || '')));
-            const missing = urls.filter(u => !currentSrcs.has(imageKeyFromUrl(u)));
-            if (!missing.length) {
-              if (current.length > 0) {
-                db.prepare('UPDATE suprides_products SET images_synced = 1 WHERE sku = ?').run(sku);
-                skipped++;
-                send({ type: 'log', level: 'info', sku, msg: `[OK] ${current.length} imagem(s) já presente(s)` });
-              } else {
-                // BD tem URLs mas Shopify está vazio — re-upload completo
-                if (dryRun) {
-                  send({ type: 'log', level: 'warn', sku, msg: `[PLAN] re-upload de ${urls.length} imagem(s) (Shopify vazio)` });
-                } else {
-                  let added = 0, addFails: string[] = [];
-                  for (let i = 0; i < urls.length; i++) {
-                    try { await addProductImage(productId, urls[i], i + 1); added++; }
-                    catch (e: any) { addFails.push(`${urls[i]}: ${e?.message ?? e}`); }
-                  }
-                  if (added > 0) {
-                    db.prepare('UPDATE suprides_products SET images_synced = 1 WHERE sku = ?').run(sku);
-                    uploaded++;
-                    send({ type: 'log', level: 'info', sku, msg: `[UPLOAD] ${added}/${urls.length} imagem(s) (Shopify estava vazio)` });
-                  } else {
-                    failed++;
-                    errors.push({ sku, error: addFails.join('; ') || 'addProductImage devolveu null' });
-                    send({ type: 'log', level: 'error', sku, msg: `[ERRO] addProductImage falhou: ${addFails[0] ?? 'sem detalhe'}` });
-                  }
-                }
-              }
-            } else {
-              if (dryRun) {
-                send({ type: 'log', level: 'warn', sku, msg: `[PLAN] +${missing.length} imagem(s) em falta` });
-              } else {
-                let added = 0, addFails: string[] = [];
-                for (let i = 0; i < missing.length; i++) {
-                  try { await addProductImage(productId, missing[i], current.length + i + 1); added++; }
-                  catch (e: any) { addFails.push(`${missing[i]}: ${e?.message ?? e}`); }
-                }
-                if (added === missing.length && added > 0) {
-                  db.prepare('UPDATE suprides_products SET images_synced = 1 WHERE sku = ?').run(sku);
-                  uploaded++;
-                  send({ type: 'log', level: 'info', sku, msg: `[UPLOAD] +${added} imagem(s)` });
-                } else if (added > 0) {
-                  uploaded++;
-                  send({ type: 'log', level: 'warn', sku, msg: `[PARCIAL] ${added}/${missing.length} carregadas — ${addFails[0]}` });
-                } else {
-                  failed++;
-                  errors.push({ sku, error: addFails.join('; ') || 'addProductImage devolveu null' });
-                  send({ type: 'log', level: 'error', sku, msg: `[ERRO] ${addFails[0] ?? 'addProductImage falhou'}` });
-                }
-              }
-            }
-          } else if (mode === 'all') {
-            // Destrutivo: apaga existentes e re-faz upload pela ordem do feed.
+          if (mode === 'all') {
+            // Destrutivo: apaga existentes e re-faz upload pela ordem do feed (só fotos que a Suprides já tem).
+            const current = await getProductImages(productId);
             if (dryRun) {
-              const current = await getProductImages(productId);
               send({ type: 'log', level: 'warn', sku, msg: `[PLAN] substituir ${current.length} → ${urls.length} imagem(s)` });
             } else {
-              const current = await getProductImages(productId);
-              for (const img of current) {
-                try { await deleteProductImage(productId, img.id); }
-                catch (e: any) { send({ type: 'log', level: 'warn', sku, msg: `[DEL-FAIL] img ${img.id}: ${e?.message ?? e}` }); }
-              }
-              let added = 0, addFails: string[] = [];
-              for (let i = 0; i < urls.length; i++) {
-                try { await addProductImage(productId, urls[i], i + 1); added++; }
-                catch (e: any) { addFails.push(`${urls[i]}: ${e?.message ?? e}`); }
-              }
-              if (added > 0) {
-                db.prepare('UPDATE suprides_products SET images_synced = 1 WHERE sku = ?').run(sku);
-                uploaded++;
-                send({ type: 'log', level: 'info', sku, msg: `[REPLACE] ${added}/${urls.length} imagem(s)` });
-              } else {
+              const ready: string[] = [];
+              for (const u of urls) if ((await checkSourceImage(u)) === 'real') ready.push(u);
+              if (!ready.length) {
                 failed++;
-                errors.push({ sku, error: addFails.join('; ') || 'sem upload' });
-                send({ type: 'log', level: 'error', sku, msg: `[ERRO] ${addFails[0] ?? 'upload falhou'}` });
+                errors.push({ sku, error: 'A Suprides ainda não tem as fotos (devolve o ícone genérico)' });
+                send({ type: 'log', level: 'warn', sku, msg: '[ESPERA] fotos ainda não disponíveis na Suprides' });
+              } else {
+                if (current.length) await deleteImageFiles(current.map(i => i.id));
+                await addProductImages(productId, ready);
+                db.prepare('UPDATE suprides_products SET images_synced = 0 WHERE sku = ?').run(sku);
+                uploaded++;
+                send({ type: 'log', level: 'info', sku, msg: `[REPLACE] ${ready.length}/${urls.length} imagem(s) — confirmação no próximo envio` });
               }
             }
           } else {
-            // mode = 'missing' — só envia se images_synced=0; assume Shopify ainda não tem.
-            if (dryRun) {
-              send({ type: 'log', level: 'warn', sku, msg: `[PLAN] upload de ${urls.length} imagem(s)` });
+            // missing / verify: só o que falta, sem ícones genéricos; marca quando tudo está pronto.
+            const r = await sendProductImages({ sku, productId, urls }, { dryRun });
+            if (r.complete) {
+              skipped++;
+              send({ type: 'log', level: 'info', sku, msg: '[OK] imagens completas' });
+            } else if (r.added || r.placeholdersRemoved) {
+              uploaded++;
+              send({ type: 'log', level: dryRun ? 'warn' : 'info', sku,
+                msg: `${dryRun ? '[PLAN]' : '[UPLOAD]'} +${r.added} imagem(s)${r.placeholdersRemoved ? `, ${r.placeholdersRemoved} ícone(s) genérico(s) retirado(s)` : ''}${r.notReadyAtSource ? `, ${r.notReadyAtSource} ainda sem foto na Suprides` : ''}` });
             } else {
-              let added = 0, addFails: string[] = [];
-              for (let i = 0; i < urls.length; i++) {
-                try { await addProductImage(productId, urls[i], i + 1); added++; }
-                catch (e: any) { addFails.push(`${urls[i]}: ${e?.message ?? e}`); }
-              }
-              if (added > 0) {
-                db.prepare('UPDATE suprides_products SET images_synced = 1 WHERE sku = ?').run(sku);
-                uploaded++;
-                send({ type: 'log', level: 'info', sku, msg: `[UPLOAD] ${added}/${urls.length} imagem(s)` });
-              } else {
-                failed++;
-                errors.push({ sku, error: addFails.join('; ') || 'addProductImage devolveu null' });
-                send({ type: 'log', level: 'error', sku, msg: `[ERRO] ${addFails[0] ?? 'addProductImage falhou'}` });
-              }
+              send({ type: 'log', level: 'warn', sku, msg: `[ESPERA] ${r.notReadyAtSource} foto(s) ainda não disponíveis na Suprides (ou em processamento na Shopify)` });
             }
           }
         } catch (e: any) {

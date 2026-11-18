@@ -4,8 +4,9 @@ import { parseStockStatus, formatStockStatusLabel, type StockStatus } from '../a
 import {
   createProduct, productUpdate, variantUpdate, publishProduct,
   findCollectionId, removeProductFromCollection, fetchProductsInCollection,
-  resetSyncAbort, abortSync, reconcileProductImages, toMetafieldKey,
+  resetSyncAbort, abortSync, toMetafieldKey,
 } from '../api/shopify-api';
+import { sendProductImages } from '../../services/images-sync';
 import { planProductWrite, contentHash, type DesiredProduct } from '../services/shopify-diff';
 import { normalizeMoney, applyMargin, applyRounding, slug } from '../services/price-calc';
 import { loadSupridesTaxonomy, normTaxonomyValue } from '../services/taxonomy';
@@ -605,14 +606,13 @@ export async function runFullShopifySync(opts: {
     );
     const saveContentHash = db.prepare('UPDATE suprides_products SET shopify_content_hash = ? WHERE sku = ?');
 
-    // Imagens: acrescenta só as que faltam; um erro aqui não falha o produto.
+    // Imagens: acrescenta só as que faltam e que a Suprides já tem (não o ícone genérico).
+    // Só fica marcado quando tudo está pronto na loja; o resto é confirmado por images:run.
+    // Um erro aqui não falha o produto.
     const syncImages = async (sku: string, productId: number, urls: string[]) => {
       try {
-        const { complete } = await reconcileProductImages(productId, urls);
-        if (complete) {
-          db.prepare('UPDATE suprides_products SET images_synced = 1 WHERE sku = ?').run(sku);
-          skuImagesSynced.set(sku, true);
-        }
+        const { complete } = await sendProductImages({ sku, productId, urls });
+        if (complete) skuImagesSynced.set(sku, true);
       } catch (imgErr: any) {
         console.warn(`[Suprides] imagens SKU ${sku}:`, imgErr?.message);
       }
