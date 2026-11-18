@@ -12,17 +12,6 @@ export interface FamiliaTree {
 
 export type PriceMode = 'percentage' | 'fixed';
 
-export interface PricingRule { mode: PriceMode; marginValue: number; }
-export interface LinePricingRule  extends PricingRule { product_line: string; }
-export interface FamilyPricingRule extends PricingRule { family: string; }
-export interface SubfamiliaPricingRule extends PricingRule { subfamilia: string; }
-
-export interface Margins {
-  linePricingRules: LinePricingRule[];
-  familyPricingRules: FamilyPricingRule[];
-  pricingRules: SubfamiliaPricingRule[];
-}
-
 export interface Rounding { }
 export interface AdminSettings { ivaRate: number; rounding: Rounding; }
 
@@ -139,13 +128,6 @@ export class SupridesService {
     return this.http.put<Mappings>(`${this.api}/mappings`, data);
   }
 
-  getMargins(): Observable<Margins> {
-    return this.http.get<Margins>(`${this.api}/margins`);
-  }
-
-  saveMargins(data: Margins): Observable<Margins> {
-    return this.http.put<Margins>(`${this.api}/margins`, data);
-  }
 
   getAdminSettings(): Observable<AdminSettings> {
     return this.http.get<AdminSettings>(`${this.api}/admin/settings`);

@@ -1,7 +1,7 @@
 import path from "path";
 
 /**
- * Pasta raiz dos dados (SQLite + configs JSON).
+ * Pasta dos snapshots, planos, relatórios e fontes de importação legadas.
  * - DATA_DIR no .env (recomendado em servidor, caminho absoluto); ou
  * - apps/backend/data, resolvido a partir deste ficheiro (funciona em src/ e dist/),
  *   independentemente da pasta onde o processo é arrancado.
