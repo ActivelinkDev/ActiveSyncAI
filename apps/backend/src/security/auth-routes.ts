@@ -1,5 +1,5 @@
 /**
- * /api/auth — login, sessão, confirmação da palavra-passe e mudança de palavra-passe.
+ * /api/auth — login, sessão e mudança de palavra-passe.
  */
 import { Router, type Request, type Response } from 'express';
 import crypto from 'crypto';
@@ -10,8 +10,7 @@ import {
   loadAccount, saveAccount, verifyPassword, hashPassword, passwordProblem, dummyPasswordHash,
 } from './password';
 import {
-  createSession, getSession, destroySession, destroyAllSessions, elevateSession, isElevated,
-  SESSION_IDLE_MS, ELEVATION_MS,
+  createSession, getSession, destroySession, destroyAllSessions, SESSION_IDLE_MS,
 } from './sessions';
 import { sessionCookieName, sessionCookieOptions, sessionToken } from './middleware';
 
@@ -74,34 +73,7 @@ router.post('/logout', (req, res) => {
 router.get('/me', (req, res) => {
   const s = getSession(sessionToken(req));
   if (!s) { res.status(401).json({ error: 'not_authenticated', accountConfigured: !!loadAccount() }); return; }
-  res.json({ username: s.username, elevated: isElevated(s), idleTimeoutMs: SESSION_IDLE_MS });
-});
-
-/** Repetir a palavra-passe antes de uma ação perigosa (vale 5 minutos). */
-router.post('/reauth', async (req, res) => {
-  const ip = clientIp(req);
-  const s = req.session!;
-  const blocked = loginBlockedFor(ip);
-  if (blocked > 0) { tooMany(res, blocked); return; }
-  const ok = await checkCredentials(s.username, req.body?.password);
-  if (!ok) {
-    const { lockedMs } = registerFailure(ip);
-    audit('reauth.fail', { ip, user: s.username });
-    await failDelay();
-    if (lockedMs > 0) {
-      // Demasiadas falhas com a sessão aberta: termina a sessão.
-      destroySession(sessionToken(req));
-      res.clearCookie(sessionCookieName(), sessionCookieOptions());
-      tooMany(res, lockedMs);
-      return;
-    }
-    res.status(401).json({ error: 'invalid_credentials' });
-    return;
-  }
-  registerSuccess(ip);
-  elevateSession(sessionToken(req)!);
-  audit('reauth.ok', { ip, user: s.username });
-  res.json({ ok: true, validForMs: ELEVATION_MS });
+  res.json({ username: s.username, idleTimeoutMs: SESSION_IDLE_MS });
 });
 
 router.post('/password', async (req, res) => {
@@ -112,7 +84,7 @@ router.post('/password', async (req, res) => {
   const ok = await checkCredentials(s.username, req.body?.currentPassword);
   if (!ok) {
     registerFailure(ip);
-    audit('reauth.fail', { ip, user: s.username, detail: 'mudança de palavra-passe' });
+    audit('password.fail', { ip, user: s.username });
     await failDelay();
     res.status(401).json({ error: 'invalid_credentials' });
     return;

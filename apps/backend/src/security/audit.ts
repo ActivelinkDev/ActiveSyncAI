@@ -8,8 +8,8 @@ import { dataPath } from '../utils/data-dir';
 
 export type AuditEvent =
   | 'login.ok' | 'login.fail' | 'login.locked' | 'logout'
-  | 'reauth.ok' | 'reauth.fail' | 'password.changed'
-  | 'access.denied.ip' | 'access.denied.origin' | 'access.denied.reauth'
+  | 'password.fail' | 'password.changed'
+  | 'access.denied.ip' | 'access.denied.origin'
   | 'action';
 
 export function audit(event: AuditEvent, data: { ip?: string; user?: string; detail?: string } = {}): void {

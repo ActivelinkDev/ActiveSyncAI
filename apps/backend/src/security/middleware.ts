@@ -1,10 +1,10 @@
 /**
  * Camadas de acesso aplicadas a todos os pedidos (ver index.ts):
  *   cabeçalhos de segurança → sessão obrigatória em /api → origem obrigatória em escritas →
- *   palavra-passe repetida nas ações perigosas.
+ *   registo das ações que escrevem na loja ou mudam credenciais.
  */
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import { getSession, isElevated, type Session } from './sessions';
+import { getSession, type Session } from './sessions';
 import { audit } from './audit';
 import { clientIp } from './ip-filter';
 
@@ -97,7 +97,7 @@ export function requireSameOrigin(): RequestHandler {
   };
 }
 
-// ----- Ações perigosas: palavra-passe repetida há menos de 5 min -----
+// ----- Ações sensíveis: ficam no registo de segurança (quem, quando, o quê) -----
 export const DANGEROUS: { method: string; path: RegExp; label: string }[] = [
   { method: 'POST', path: /^\/api\/suprides\/sync-familias$/, label: 'Sync completo para a Shopify' },
   { method: 'POST', path: /^\/api\/suprides\/sync-familias-cache$/, label: 'Sync completo para a Shopify' },
@@ -114,17 +114,10 @@ export function dangerousAction(req: Request) {
   return DANGEROUS.find(d => d.method === req.method && d.path.test(req.path));
 }
 
-export function requireElevationForDangerous(): RequestHandler {
-  return (req, res, next) => {
+export function auditDangerousActions(): RequestHandler {
+  return (req, _res, next) => {
     const d = dangerousAction(req);
-    if (!d) return next();
-    const s = req.session;
-    if (!s || !isElevated(s)) {
-      audit('access.denied.reauth', { ip: clientIp(req), user: s?.username, detail: d.label });
-      res.status(403).json({ error: 'reauth_required', action: d.label });
-      return;
-    }
-    audit('action', { ip: clientIp(req), user: s.username, detail: `${d.label} (${req.method} ${req.path})` });
+    if (d) audit('action', { ip: clientIp(req), user: req.session?.username, detail: `${d.label} (${req.method} ${req.path})` });
     next();
   };
 }

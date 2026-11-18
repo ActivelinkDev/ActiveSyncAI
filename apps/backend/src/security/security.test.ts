@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSubnets, ipAllowed, normalizeRemote } from './ip-filter';
-import { createSession, getSession, isElevated, destroyAllSessions, SESSION_IDLE_MS, SESSION_ABSOLUTE_MS, ELEVATION_MS } from './sessions';
+import { createSession, getSession, destroyAllSessions, SESSION_IDLE_MS, SESSION_ABSOLUTE_MS } from './sessions';
 import { registerFailure, registerSuccess, loginBlockedFor, _resetThrottle, MAX_FAILS_PER_IP } from './login-throttle';
 import { hashPassword, verifyPassword, passwordProblem } from './password';
 import { connectionView, applyConnectionUpdate } from './connection-view';
@@ -48,14 +48,6 @@ test('sessões: expiram por inatividade e pelo limite absoluto', () => {
   assert.equal(getSession(tok2, t0 + SESSION_ABSOLUTE_MS + 1), null);
   assert.equal(getSession('nao-existe', t0), null);
   assert.equal(getSession(undefined, t0), null);
-});
-
-test('sessões: confirmação da palavra-passe vale 5 minutos', () => {
-  const t0 = 2_000_000;
-  const tok = createSession('admin', 'ip', 'ua', t0);
-  const s = getSession(tok, t0)!;
-  assert.equal(isElevated(s, t0 + ELEVATION_MS - 1), true);
-  assert.equal(isElevated(s, t0 + ELEVATION_MS + 1), false);
 });
 
 test('tentativas: bloqueio após 5 falhas, a duplicar, e sucesso limpa', () => {

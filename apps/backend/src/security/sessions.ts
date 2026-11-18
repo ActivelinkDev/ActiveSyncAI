@@ -6,11 +6,10 @@ import crypto from 'crypto';
 
 export const SESSION_IDLE_MS = 30 * 60_000;          // 30 min sem uso
 export const SESSION_ABSOLUTE_MS = 12 * 60 * 60_000; // 12 h no máximo
-export const ELEVATION_MS = 5 * 60_000;              // palavra-passe repetida vale 5 min
 
 export interface Session {
   username: string; ip: string; userAgent: string;
-  createdAt: number; lastSeen: number; elevatedUntil: number;
+  createdAt: number; lastSeen: number;
 }
 
 const sessions = new Map<string, Session>();
@@ -18,8 +17,7 @@ const hash = (token: string) => crypto.createHash('sha256').update(token).digest
 
 export function createSession(username: string, ip: string, userAgent: string, now = Date.now()): string {
   const token = crypto.randomBytes(32).toString('base64url');
-  // Acabado de autenticar: conta como palavra-passe confirmada.
-  sessions.set(hash(token), { username, ip, userAgent: userAgent.slice(0, 200), createdAt: now, lastSeen: now, elevatedUntil: now + ELEVATION_MS });
+  sessions.set(hash(token), { username, ip, userAgent: userAgent.slice(0, 200), createdAt: now, lastSeen: now });
   return token;
 }
 
@@ -35,15 +33,6 @@ export function getSession(token: string | undefined, now = Date.now()): Session
   }
   s.lastSeen = now;
   return s;
-}
-
-export function elevateSession(token: string, now = Date.now()): void {
-  const s = sessions.get(hash(token));
-  if (s) s.elevatedUntil = now + ELEVATION_MS;
-}
-
-export function isElevated(s: Session, now = Date.now()): boolean {
-  return s.elevatedUntil > now;
 }
 
 export function destroySession(token: string | undefined): void {

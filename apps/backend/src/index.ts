@@ -18,7 +18,7 @@ import { parseSubnets, ipFilter, isLoopback } from "./security/ip-filter";
 import { audit } from "./security/audit";
 import {
   configureSecurity, securityHeaders, requireSession, requireSameOrigin,
-  requireElevationForDangerous, errorHandler,
+  auditDangerousActions, errorHandler,
 } from "./security/middleware";
 import authRouter from "./security/auth-routes";
 import { loadAccount } from "./security/password";
@@ -58,10 +58,10 @@ app.use(express.urlencoded({ extended: false, limit: "100kb" }));
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 // 4. Sessão obrigatória em /api (exceto login), origem obrigatória em escritas,
-//    palavra-passe repetida nas ações perigosas.
+//    registo das ações sensíveis.
 app.use(requireSameOrigin());
 app.use(requireSession());
-app.use(requireElevationForDangerous());
+app.use(auditDangerousActions());
 
 app.use("/api/auth",         authRouter);
 app.use("/api/logs",         logsRouter);
