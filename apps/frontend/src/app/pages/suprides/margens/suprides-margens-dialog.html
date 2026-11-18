@@ -1,4 +1,4 @@
-<div style="display:flex;flex-direction:column;height:100%;background:#fff;overflow:hidden;font-family:'Poppins','Segoe UI',sans-serif;">
+<div style="display:flex;flex-direction:column;height:100%;background:var(--surface-2);overflow:hidden;font-family:'Poppins','Segoe UI',sans-serif;">
 
   <!-- HEADER -->
   <div class="sm-header">
@@ -150,7 +150,7 @@
     </span>
     <span class="error-msg" *ngIf="error && !success">{{ error }}</span>
     <div style="flex:1"></div>
-    <button mat-button (click)="close()" style="color:#4b5563;font-weight:600">Cancelar</button>
+    <button mat-button (click)="close()" style="color:var(--ink);font-weight:600">Cancelar</button>
     <button mat-raised-button (click)="save()" [disabled]="saving" class="save-btn">
       <mat-icon>save</mat-icon>
       {{ saving ? 'A guardar…' : 'Guardar margens' }}

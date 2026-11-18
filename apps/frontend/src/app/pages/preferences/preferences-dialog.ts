@@ -30,14 +30,14 @@ import { TagsService } from '../../services/tags.service';
   `,
   styles: [`
     .dc-wrap { padding: 32px 28px 24px; display: flex; flex-direction: column; align-items: center; text-align: center; width: 400px; max-width: 92vw; box-sizing: border-box; }
-    .dc-icon-ring { width: 68px; height: 68px; border-radius: 50%; background: #fee2e2; border: 3px solid #fca5a5; display: flex; align-items: center; justify-content: center; margin-bottom: 18px; }
-    .dc-icon-ring mat-icon { font-size: 36px !important; width: 36px !important; height: 36px !important; color: #dc2626; }
-    .dc-title { font-size: 18px; font-weight: 800; color: #1d1d1f; margin-bottom: 12px; letter-spacing: -0.2px; }
-    .dc-body { font-size: 13.5px; color: rgba(0,0,0,.58); line-height: 1.65; margin-bottom: 26px; }
-    ::ng-deep .dc-body strong { color: #dc2626; font-weight: 700; }
+    .dc-icon-ring { width: 68px; height: 68px; border-radius: 50%; background: var(--bad-bg); border: 3px solid var(--line-strong); display: flex; align-items: center; justify-content: center; margin-bottom: 18px; }
+    .dc-icon-ring mat-icon { font-size: 36px !important; width: 36px !important; height: 36px !important; color: var(--bad); }
+    .dc-title { font-size: 18px; font-weight: 800; color: var(--ink); margin-bottom: 12px; letter-spacing: -0.2px; }
+    .dc-body { font-size: 13.5px; color: var(--muted); line-height: 1.65; margin-bottom: 26px; }
+    ::ng-deep .dc-body strong { color: var(--bad); font-weight: 700; }
     .dc-actions { display: flex; gap: 10px; width: 100%; }
-    .dc-cancel { flex: 1; height: 42px; border: 1px solid rgba(0,0,0,.12); background: #fff; border-radius: 10px; font-size: 13.5px; font-weight: 600; cursor: pointer; color: rgba(0,0,0,.65); transition: background .12s; }
-    .dc-cancel:hover { background: #f5f5f7; }
+    .dc-cancel { flex: 1; height: 42px; border: 1px solid rgba(0,0,0,.12); background: var(--surface-2); border-radius: 10px; font-size: 13.5px; font-weight: 600; cursor: pointer; color: var(--muted); transition: background .12s; }
+    .dc-cancel:hover { background: var(--surface-2); }
     .dc-delete { flex: 2; height: 42px; border: none; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border-radius: 10px; font-size: 13.5px; font-weight: 700; cursor: pointer; color: #fff; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 3px 14px rgba(220,38,38,.45); }
     .dc-delete mat-icon { font-size: 17px !important; width: 17px !important; height: 17px !important; }
   `]

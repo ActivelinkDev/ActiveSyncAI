@@ -125,7 +125,7 @@
   outline: none;
   background: transparent;
   font-size: 13px;
-  font-family: var(--font);
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
   color: var(--ink);
   min-width: 0;
 
@@ -169,7 +169,7 @@
   color: var(--muted-2);
   font-size: 12.5px;
   text-align: center;
-  font-family: var(--font);
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
 
   mat-icon { font-size: 28px; width: 28px; height: 28px; opacity: 0.3; }
 }
@@ -185,7 +185,7 @@
   border-bottom: 1px solid var(--surface-2);
   margin-bottom: 4px;
   font-size: 12px;
-  font-family: var(--font);
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
   color: var(--muted-2);
   cursor: pointer;
   text-align: left;
@@ -230,7 +230,7 @@
   border: none;
   cursor: pointer;
   font-size: 13px;
-  font-family: var(--font);
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
   color: var(--ink);
   text-align: left;
   transition: background 0.1s;
@@ -263,8 +263,8 @@
 }
 
 .ss-opt-text mark {
-  background: #fef08a;
-  color: #78350f;
+  background: var(--warn-bg);
+  color: var(--warn);
   border-radius: 3px;
   padding: 0 2px;
   font-style: normal;

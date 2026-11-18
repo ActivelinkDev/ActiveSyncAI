@@ -39,7 +39,7 @@ import { AuthService } from './auth.service';
   `,
   styles: [`
     .login-page { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
-    .login-card { width: min(400px, 100%); padding: 34px 30px; display: flex; flex-direction: column; }
+    .login-card { width: min(400px, 100%); padding: 34px 30px; display: flex; flex-direction: column; font-family: var(--font-head); }
     .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
     .brand-mark { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--brand); color: #fff; }
     .brand-text { font-weight: 800; font-size: 20px; letter-spacing: -.3px; line-height: 1; }

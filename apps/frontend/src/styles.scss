@@ -1,7 +1,15 @@
 @import '@angular/material/prebuilt-themes/pink-bluegrey.css';
 /* Ícones e letra guardados na própria app (sem Google Fonts — a CSP só permite a mesma origem). */
 @import 'material-icons/iconfont/filled.css';
-@import '@fontsource-variable/inter/index.css';
+@import '@fontsource/poppins/300.css';
+@import '@fontsource/poppins/400.css';
+@import '@fontsource/poppins/500.css';
+@import '@fontsource/poppins/600.css';
+@import '@fontsource/poppins/700.css';
+@import '@fontsource/roboto/300.css';
+@import '@fontsource/roboto/400.css';
+@import '@fontsource/roboto/500.css';
+@import '@fontsource/roboto/700.css';
 
 /* ============================================================
    TEMA — escuro, corporativo, vidro discreto, marca #FF3300
@@ -13,7 +21,7 @@
   --brand-text: #ff7a52;            /* laranja legível em texto sobre fundo escuro */
   --brand-soft: rgba(255, 51, 0, .14);
   --accent: var(--brand);
-  --accent-soft: rgba(255, 51, 0, .12);
+  --accent-soft: rgba(255, 51, 0, .10);
 
   --bg: #0e1013;
   --ink: #e7e9ec;
@@ -40,7 +48,9 @@
   --warn: #f0b35a; --warn-bg: rgba(240, 179, 90, .12);
   --bad: #f2777a; --bad-bg: rgba(242, 119, 122, .12);
 
-  --font: "Inter Variable", "Segoe UI", system-ui, sans-serif;
+  --font: Roboto, "Segoe UI", system-ui, sans-serif;       /* base (como antes) */
+  --font-ui: "Segoe UI", Tahoma, sans-serif;                 /* moldura (como antes) */
+  --font-head: Poppins, "Segoe UI", sans-serif;              /* janelas e login (como antes) */
 
   /* Angular Material (tema M2) — cor principal = marca, superfícies de vidro */
   --mat-dialog-container-color: var(--glass-dialog);
@@ -115,7 +125,7 @@ app-login { position: relative; z-index: 1; display: block; }
 /* Campos e botões simples (login, palavra-passe) */
 .g-input {
   width: 100%; height: 42px; padding: 0 12px; box-sizing: border-box;
-  border-radius: 10px; font: 14.5px var(--font); color: var(--ink);
+  border-radius: 10px; font: 14.5px var(--font-head); color: var(--ink);
   background: rgba(255, 255, 255, .04); border: 1px solid var(--line-strong);
   outline: none; transition: border-color .15s, box-shadow .15s;
 }
@@ -123,7 +133,7 @@ app-login { position: relative; z-index: 1; display: block; }
 .g-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: 40px; padding: 0 16px; border-radius: 10px; cursor: pointer;
-  font: 600 14px var(--font); color: var(--ink);
+  font: 600 14px var(--font-head); color: var(--ink);
   background: var(--glass-strong); border: 1px solid var(--line);
   transition: background .15s, box-shadow .15s;
 }
@@ -361,3 +371,59 @@ app-login { position: relative; z-index: 1; display: block; }
 .mapping-dialog-panel .map-table .mat-mdc-header-cell {
   box-shadow: 0 2px 4px rgba(0,0,0,.04);
 }
+
+/* ============================================================
+   Material — o tema escuro pré-feito usa rosa/roxo como destaque:
+   tudo passa para a cor da marca.
+   ============================================================ */
+html .mat-mdc-tab-group, html .mat-mdc-tab-nav-bar {
+  --mat-tab-header-active-label-text-color: var(--ink);
+  --mat-tab-header-active-focus-label-text-color: var(--ink);
+  --mat-tab-header-active-hover-label-text-color: var(--ink);
+  --mat-tab-header-active-ripple-color: var(--brand);
+  --mat-tab-header-inactive-ripple-color: var(--brand);
+  --mat-tab-header-inactive-label-text-color: var(--muted);
+  --mdc-tab-indicator-active-indicator-color: var(--brand);
+  --mat-tab-header-active-focus-indicator-color: var(--brand);
+  --mat-tab-header-active-hover-indicator-color: var(--brand);
+  --mat-tab-active-label-text-color: var(--ink);
+  --mat-tab-active-focus-label-text-color: var(--ink);
+  --mat-tab-active-hover-label-text-color: var(--ink);
+  --mat-tab-inactive-label-text-color: var(--muted);
+  --mat-tab-active-indicator-color: var(--brand);
+  --mat-tab-active-focus-indicator-color: var(--brand);
+  --mat-tab-active-hover-indicator-color: var(--brand);
+}
+html .mat-mdc-button-base.mat-accent, html .mat-mdc-button-base.mat-primary, html .mat-mdc-button-base.mat-warn {
+  --mdc-filled-button-container-color: var(--brand);
+  --mdc-filled-button-label-text-color: #fff;
+  --mat-button-filled-container-color: var(--brand);
+  --mat-button-filled-label-text-color: #fff;
+  --mdc-protected-button-container-color: var(--brand);
+  --mdc-protected-button-label-text-color: #fff;
+  --mat-button-protected-container-color: var(--brand);
+  --mat-button-protected-label-text-color: #fff;
+  --mdc-text-button-label-text-color: var(--brand-text);
+  --mat-button-text-label-text-color: var(--brand-text);
+  --mdc-outlined-button-label-text-color: var(--brand-text);
+  --mat-button-outlined-label-text-color: var(--brand-text);
+  --mdc-icon-button-icon-color: var(--brand-text);
+  --mat-icon-button-icon-color: var(--brand-text);
+}
+html .mat-mdc-button-base.mat-warn { --mdc-filled-button-container-color: var(--bad); --mat-button-filled-container-color: var(--bad); }
+html {
+  --mdc-checkbox-selected-icon-color: var(--brand);
+  --mdc-radio-selected-icon-color: var(--brand);
+  --mat-radio-checked-ripple-color: var(--brand);
+  --mdc-slide-toggle-selected-handle-color: var(--brand);
+  --mat-slide-toggle-selected-handle-color: var(--brand);
+  --mdc-slide-toggle-selected-track-color: rgba(255, 51, 0, .4);
+  --mat-slide-toggle-selected-track-color: rgba(255, 51, 0, .4);
+  --mat-option-selected-state-label-text-color: var(--brand-text);
+  --mat-form-field-focus-select-arrow-color: var(--brand);
+  --mdc-outlined-text-field-focus-label-text-color: var(--brand-text);
+  --mdc-filled-text-field-focus-active-indicator-color: var(--brand);
+  --mat-badge-background-color: var(--brand);
+  --mat-badge-text-color: #fff;
+}
+.mat-accent, .mat-primary { --mat-mdc-button-persistent-ripple-color: var(--brand); }

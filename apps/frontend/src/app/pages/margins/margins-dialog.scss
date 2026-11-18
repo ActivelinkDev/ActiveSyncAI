@@ -4,7 +4,7 @@
 :host {
   display: flex;
   flex-direction: column;
-  font-family: var(--font);
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
 }
 
 // ── Header estilo ActiveSync ──
@@ -13,7 +13,7 @@
   flex-direction: column;
   padding: 12px 20px 10px;
   background: var(--surface);
-  border-bottom: 2px solid #e8eaf6;
+  border-bottom: 2px solid var(--line-strong);
   flex-shrink: 0;
   position: relative;
 
@@ -38,7 +38,7 @@
     font-size: 16px;
     font-weight: 700;
     color: var(--ink);
-    font-family: var(--font);
+    font-family: 'Poppins', sans-serif;
     letter-spacing: -0.01em;
   }
 }
@@ -94,7 +94,7 @@
     width: 80px;
     padding: 4px 6px;
     font-size: 12px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--line-strong);
     border-radius: 4px;
   }
 }
@@ -117,7 +117,7 @@
     input {
       width: 60px;
       padding: 2px 4px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--line-strong);
       border-radius: 3px;
     }
   }
