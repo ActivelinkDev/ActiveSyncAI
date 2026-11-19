@@ -78,6 +78,17 @@ test('API /api/campanhas: criar, produtos, pré-visualizar, agendar, conflito, c
     assert.equal((bySku.get('TST-API2') as any).promo, 17);
     assert.equal((bySku.get('TST-API1') as any).product.name, 'Rato API');
 
+    // Previsão de um rascunho por gravar (nada é escrito) e gravação dos itens com exceções de uma vez
+    const draft = await call('POST', '/previsao', {
+      discountType: 'AMOUNT', discountValue: 2, startsAt: body.startsAt,
+      items: [{ sku: 'TST-API1' }, { sku: 'TST-API2', override: { type: 'PERCENT', value: 25 } }],
+    });
+    assert.equal(draft.status, 200);
+    assert.deepEqual(draft.body.map((e: any) => [e.sku, e.promo]), [['TST-API1', 18], ['TST-API2', 15]]);
+    assert.equal((await call('POST', '/previsao', { discountType: 'PERCENT', discountValue: 150, startsAt: body.startsAt, items: [] })).status, 400);
+    const saved = await call('PUT', `/${id}/itens`, { items: [{ sku: 'TST-API1' }, { sku: 'TST-API2', override: { type: 'AMOUNT', value: 3 } }, { sku: 'NAO-EXISTE' }] });
+    assert.deepEqual(saved.body, { count: 2, unknown: ['NAO-EXISTE'] });
+
     const detail = await call('GET', `/${id}`);
     assert.equal(detail.body.status, 'RASCUNHO');
     assert.equal(detail.body.products.length, 2);

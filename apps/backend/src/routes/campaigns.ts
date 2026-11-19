@@ -8,7 +8,8 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import {
   CampaignError, listCampaigns, getCampaign, createCampaign, updateCampaign, deleteCampaign,
   setCampaignProducts, setProductOverride, previewCampaign, scheduleCampaign, unscheduleCampaign, cancelCampaign,
-  searchProducts, productFilterOptions, productInfo, historyStartedAt,
+  searchProducts, productFilterOptions, productInfo, historyStartedAt, previewDraft, saveCampaignItems,
+  type DraftItem,
   type CampaignInput,
 } from '../suprides/repositories/campaigns';
 import type { Discount } from '../suprides/services/campaign-calc';
@@ -83,9 +84,26 @@ router.get('/filtros', route(async (_req, res) => { res.json(await productFilter
 router.post('/selecao', route(async (req, res) => {
   const b = req.body ?? {};
   res.json(await searchProducts({
-    brand: str(b.brand), productLine: str(b.productLine), family: str(b.family), stockStatus: str(b.stockStatus),
+    brand: str(b.brand), productLine: str(b.productLine), family: str(b.family), subFamily: str(b.subFamily), stockStatus: str(b.stockStatus),
     text: str(b.text), skus: parseSkus(b.skus), onlyManaged: b.onlyManaged !== false,
   }));
+}));
+
+function parseItems(v: unknown): DraftItem[] {
+  if (!Array.isArray(v)) throw bad('Lista de produtos inválida.');
+  return v.map((it: any) => ({
+    sku: String(it?.sku ?? ''),
+    override: it?.override?.type == null ? null : parseDiscount(it.override.type, it.override.value),
+  }));
+}
+
+// Pré-visualização de um rascunho ainda não gravado (nada é escrito).
+router.post('/previsao', route(async (req, res) => {
+  const b = req.body ?? {};
+  const d = parseDiscount(b.discountType, b.discountValue);
+  const items = await previewDraft({ discountType: d.type, discountValue: d.value, startsAt: parseDate(b.startsAt, 'Início') }, parseItems(b.items));
+  const info = await productInfo(items.map(i => i.sku));
+  res.json(items.map(e => ({ ...e, product: info.get(e.sku) ?? null })));
 }));
 
 router.get('/', route(async (_req, res) => { res.json(await listCampaigns()); }));
@@ -115,6 +133,11 @@ router.put('/:id/produtos', route(async (req, res) => {
   const skus = parseSkus(req.body?.skus);
   if (skus.length > 20000) throw bad('No máximo 20 000 produtos por campanha.');
   res.json(await setCampaignProducts(idParam(req), skus));
+}));
+
+// Produtos + exceções de um rascunho, de uma vez (Guardar rascunho).
+router.put('/:id/itens', route(async (req, res) => {
+  res.json(await saveCampaignItems(idParam(req), parseItems(req.body?.items)));
 }));
 
 router.put('/:id/produtos/:sku/excecao', route(async (req, res) => {

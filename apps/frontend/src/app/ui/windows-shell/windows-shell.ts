@@ -142,7 +142,9 @@ export class WindowsShellComponent implements OnInit, OnDestroy {
 
   openCampaigns(): void {
     this.dialog.open(CampaignsDialog, {
-      width: '1200px', maxWidth: '98vw', height: '92vh', maxHeight: '92vh',
+      width: '98vw', maxWidth: '1600px', height: '92vh', maxHeight: '92vh',
+      // Fecha só pelo X (que avisa se houver alterações por gravar).
+      disableClose: true,
       panelClass: ['b2b-dialog', 'campaigns-dialog']
     });
   }

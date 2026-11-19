@@ -219,7 +219,7 @@ export interface EvaluatedProduct extends ProductEvaluation {
   override: Discount | null;
 }
 
-async function evaluateItems(db: Db, c: Campaign, items: { sku: string; override: Discount | null }[], at: Date): Promise<EvaluatedProduct[]> {
+async function evaluateItems(db: Db, campaignDiscount: Discount, items: { sku: string; override: Discount | null }[], at: Date): Promise<EvaluatedProduct[]> {
   if (!items.length) return [];
   const { ivaRate } = await loadAdminSettings();
   const skus = items.map(i => i.sku);
@@ -233,7 +233,7 @@ async function evaluateItems(db: Db, c: Campaign, items: { sku: string; override
   const refs = await referencesFor(skus, at);
   return items.map(it => {
     const p = products.get(it.sku);
-    const discount = it.override ?? { type: c.discountType, value: c.discountValue };
+    const discount = it.override ?? campaignDiscount;
     const ref = refs.get(it.sku);
     const cost = num(p?.cost);
     const e = evaluateProduct({
@@ -249,7 +249,60 @@ async function evaluateItems(db: Db, c: Campaign, items: { sku: string; override
 export async function previewCampaign(id: number, now = new Date(), db: Db = getMssql()): Promise<EvaluatedProduct[]> {
   const c = await getCampaign(id, db);
   const at = c.startsAt.getTime() > now.getTime() ? c.startsAt : now;
-  return evaluateItems(db, c, c.products.map(p => ({ sku: p.sku, override: p.override })), at);
+  return evaluateItems(db, { type: c.discountType, value: c.discountValue }, c.products.map(p => ({ sku: p.sku, override: p.override })), at);
+}
+
+export interface DraftItem { sku: string; override: Discount | null }
+export const MAX_CAMPAIGN_PRODUCTS = 20000;
+
+function validateItems(items: DraftItem[]): DraftItem[] {
+  if (items.length > MAX_CAMPAIGN_PRODUCTS) throw new CampaignError(`No máximo ${MAX_CAMPAIGN_PRODUCTS} produtos por campanha.`, 'INVALID');
+  const seen = new Map<string, DraftItem>();
+  for (const it of items) {
+    const sku = String(it.sku ?? '').trim();
+    if (!sku) continue;
+    if (it.override) validateDiscount(it.override);
+    seen.set(sku, { sku, override: it.override ?? null });
+  }
+  return [...seen.values()];
+}
+
+/**
+ * Pré-visualização de um rascunho ainda não gravado (editor da interface): mesmos cálculos,
+ * nada é escrito. Conta os 30 dias até ao início (ou até agora, se já passou).
+ */
+export async function previewDraft(
+  input: { discountType: DiscountType; discountValue: number; startsAt: Date },
+  items: DraftItem[], now = new Date(), db: Db = getMssql(),
+): Promise<EvaluatedProduct[]> {
+  const discount = { type: input.discountType, value: input.discountValue };
+  validateDiscount(discount);
+  if (!(input.startsAt instanceof Date) || isNaN(input.startsAt.getTime())) throw new CampaignError('Data de início inválida.', 'INVALID');
+  const at = input.startsAt.getTime() > now.getTime() ? input.startsAt : now;
+  return evaluateItems(db, discount, validateItems(items), at);
+}
+
+/** Grava a lista de produtos de um rascunho com as exceções (substitui tudo). Devolve os SKUs desconhecidos. */
+export async function saveCampaignItems(id: number, items: DraftItem[], db: Db = getMssql()): Promise<{ count: number; unknown: string[] }> {
+  const wanted = validateItems(items);
+  return db.transaction().execute(async trx => {
+    const c = await loadCampaignRow(trx, id);
+    requireStatus(c, ['RASCUNHO'], 'mudar os produtos de');
+    const known = new Set<string>();
+    const skus = wanted.map(i => i.sku);
+    for (let i = 0; i < skus.length; i += 1000) {
+      const rows = await trx.selectFrom('products').select('sku').where('sku', 'in', skus.slice(i, i + 1000)).execute();
+      for (const r of rows) known.add(r.sku);
+    }
+    const keep = wanted.filter(i => known.has(i.sku));
+    await trx.deleteFrom('campaign_products').where('campaign_id', '=', id).execute();
+    for (let i = 0; i < keep.length; i += 400) {
+      await trx.insertInto('campaign_products').values(keep.slice(i, i + 400).map(it => ({
+        campaign_id: id, sku: it.sku, override_type: it.override?.type ?? null, override_value: it.override?.value ?? null,
+      }))).execute();
+    }
+    return { count: keep.length, unknown: wanted.filter(i => !known.has(i.sku)).map(i => i.sku) };
+  });
 }
 
 // ── Ciclo de vida ────────────────────────────────────────────────────────────
@@ -309,7 +362,7 @@ export async function startDueCampaigns(now = new Date(), db: Db = getMssql()): 
     const items = (await db.selectFrom('campaign_products').select(['sku', 'override_type', 'override_value'])
       .where('campaign_id', '=', c.id).execute())
       .map(r => ({ sku: r.sku, override: r.override_type ? { type: r.override_type as DiscountType, value: Number(r.override_value) } : null }));
-    const evaluated = await evaluateItems(db, c, items, now);
+    const evaluated = await evaluateItems(db, { type: c.discountType, value: c.discountValue }, items, now);
     await db.transaction().execute(async trx => {
       // Valores fixados no início, em blocos (MERGE por SKU).
       for (let i = 0; i < evaluated.length; i += 150) {
@@ -447,7 +500,7 @@ export async function withdrawLossMakers(now = new Date(), db: Db = getMssql()):
 // ── Seleção de produtos (interface) ──────────────────────────────────────────
 
 export interface ProductFilters {
-  brand?: string; productLine?: string; family?: string; stockStatus?: string;
+  brand?: string; productLine?: string; family?: string; subFamily?: string; stockStatus?: string;
   /** Texto no nome ou no SKU. */
   text?: string;
   /** SKUs colados (um por linha, vírgulas ou espaços). */
@@ -481,6 +534,7 @@ export async function searchProducts(f: ProductFilters, db: Db = getMssql()): Pr
   if (f.brand) q = q.where('brand', '=', f.brand);
   if (f.productLine) q = q.where('product_line', '=', f.productLine);
   if (f.family) q = q.where('family', '=', f.family);
+  if (f.subFamily) q = q.where('sub_family', '=', f.subFamily);
   if (f.stockStatus) q = q.where('stock_status', '=', f.stockStatus);
   if (f.text?.trim()) {
     const like = `%${f.text.trim().replace(/[\%_[]/g, ch => `[${ch}]`)}%`;
@@ -497,13 +551,13 @@ export async function searchProducts(f: ProductFilters, db: Db = getMssql()): Pr
 
 /** Valores para os filtros da seleção (marcas, linhas, famílias, estados de stock). */
 export async function productFilterOptions(db: Db = getMssql()) {
-  const distinct = async (col: 'brand' | 'product_line' | 'family' | 'stock_status') =>
+  const distinct = async (col: 'brand' | 'product_line' | 'family' | 'sub_family' | 'stock_status') =>
     (await db.selectFrom('products').select(col).distinct().where(col, 'is not', null).where('removed_at', 'is', null)
       .orderBy(col).execute()).map((r: any) => r[col] as string).filter(Boolean);
-  const [brands, productLines, families, stockStatuses] = await Promise.all([
-    distinct('brand'), distinct('product_line'), distinct('family'), distinct('stock_status'),
+  const [brands, productLines, families, subFamilies, stockStatuses] = await Promise.all([
+    distinct('brand'), distinct('product_line'), distinct('family'), distinct('sub_family'), distinct('stock_status'),
   ]);
-  return { brands, productLines, families, stockStatuses };
+  return { brands, productLines, families, subFamilies, stockStatuses };
 }
 
 /** Nome, marca e preço atual dos produtos de uma campanha (para o detalhe). */

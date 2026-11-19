@@ -42,10 +42,11 @@ export interface PreviewItem {
   discount: Discount; override: Discount | null; range: ValidRange | null; product: ProductInfo | null;
 }
 
+export interface DraftItem { sku: string; override: Discount | null }
 export interface CampaignsStatus { tickerEnabled: boolean; historySince: string | null; validFrom: string | null }
-export interface FilterOptions { brands: string[]; productLines: string[]; families: string[]; stockStatuses: string[] }
+export interface FilterOptions { brands: string[]; productLines: string[]; families: string[]; subFamilies: string[]; stockStatuses: string[] }
 export interface SelectionFilters {
-  brand?: string; productLine?: string; family?: string; stockStatus?: string; text?: string; skus?: string; onlyManaged?: boolean;
+  brand?: string; productLine?: string; family?: string; subFamily?: string; stockStatus?: string; text?: string; skus?: string; onlyManaged?: boolean;
 }
 
 /** Mensagem legível de um erro da API. */
@@ -79,6 +80,14 @@ export class CampaignsService {
   }
   setOverride(id: number, sku: string, override: Discount | null) {
     return firstValueFrom(this.http.put<{ ok: true }>(`${this.API}/${id}/produtos/${encodeURIComponent(sku)}/excecao`, override ?? {}));
+  }
+  /** Pré-visualização de um rascunho por gravar (nada é escrito). */
+  previewDraft(input: { discountType: DiscountType; discountValue: number; startsAt: string }, items: DraftItem[]) {
+    return firstValueFrom(this.http.post<PreviewItem[]>(`${this.API}/previsao`, { ...input, items }));
+  }
+  /** Produtos + exceções de um rascunho, de uma vez. */
+  saveItems(id: number, items: DraftItem[]) {
+    return firstValueFrom(this.http.put<{ count: number; unknown: string[] }>(`${this.API}/${id}/itens`, { items }));
   }
   preview(id: number) { return firstValueFrom(this.http.get<PreviewItem[]>(`${this.API}/${id}/previsao`)); }
 
