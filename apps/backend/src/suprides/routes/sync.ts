@@ -10,7 +10,7 @@ import {
 } from '../api/shopify-api';
 import { sendProductImages } from '../../services/images-sync';
 import { planProductWrite, contentHash, type DesiredProduct } from '../services/shopify-diff';
-import { normalizeMoney, applyMargin, applyRounding, slug } from '../services/price-calc';
+import { normalizeMoney, applyMargin, applyRoundingNotBelow, slug } from '../services/price-calc';
 import { loadSupridesTaxonomy, normTaxonomyValue } from '../services/taxonomy';
 import {
   loadMenuItems, loadPublicMenu, loadShopifyCollectionMapping, loadStats, saveStats
@@ -688,7 +688,8 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
       const rule = findCollectionMargin(collectionIds, collMargins, hierarchyById);
       let basePrice = cost;
       if (rule) basePrice = applyMargin(basePrice, rule.mode, rule.marginValue);
-      const finalPrice = applyRounding(basePrice * ivaMultiplier, settings.rounding);
+      // Nunca abaixo de custo + IVA (venda com prejuízo): o arredondamento sobe se for preciso.
+      const finalPrice = applyRoundingNotBelow(basePrice * ivaMultiplier, cost * ivaMultiplier, settings.rounding);
 
       const price = finalPrice.toFixed(2);
       // Sem preço riscado fora de campanha (regra dos 30 dias / Omnibus, decisão 19/11): o PVPR do

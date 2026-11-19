@@ -28,6 +28,28 @@ export function applyRounding(price: number, _rounding?: Rounding): number {
   return floor + 0.90;
 }
 
+/** Euros → cêntimos inteiros (sem erros de vírgula flutuante: 33.9972 → 3400 com ceil). */
+const toCents = (v: number) => Math.round(v * 100);
+
+/** Patamar de arredondamento seguinte acima de um preço já arredondado (,49 → ,99 → ,49…; ≥ 50 € → ,90 seguinte). */
+function nextRoundingStep(rounded: number): number {
+  const floor = Math.floor(rounded);
+  if (rounded < 50 && toCents(rounded - floor) === 49) return floor + 0.99;
+  return applyRounding(floor + 1);
+}
+
+/**
+ * Arredonda como applyRounding, mas nunca abaixo de `minPrice` (custo + IVA): vender abaixo do
+ * custo é proibido. Se o arredondamento descer abaixo do mínimo, sobe para o patamar seguinte.
+ * O mínimo conta ao cêntimo, por excesso (27,64 × 1,23 = 33,9972 → 34,00).
+ */
+export function applyRoundingNotBelow(price: number, minPrice: number, rounding?: Rounding): number {
+  const minCents = Math.ceil(Math.round(minPrice * 1e6) / 1e4);
+  let r = applyRounding(Math.max(price, 0), rounding);
+  for (let i = 0; i < 1000 && toCents(r) < minCents; i++) r = nextRoundingStep(r);
+  return r;
+}
+
 export function slug(str: string): string {
   return String(str)
     .toLowerCase()

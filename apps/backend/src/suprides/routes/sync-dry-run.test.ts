@@ -37,7 +37,7 @@ const products = [
     prod({ sku: 'NOCOST-NEW', product_line: 'ACESSORIOS', price: undefined }), // não existe, sem custo → skip-no-cost
     prod({ sku: 'UNMAPPED-SEM-STOCK', product_line: 'LINHA X', stock: '0', stock_status: 'sem_stock' }), // → draft-unmapped
     prod({ sku: 'UNMAPPED-ATIVO', product_line: undefined, family: undefined }), // sem linha → preço com a margem das coleções da loja
-    prod({ sku: 'BELOW', product_line: 'ACESSORIOS', price: '41.4' }), // sem margem: 41,4 × 1,23 = 50,92 → 50,90 < custo+IVA
+    prod({ sku: 'BELOW', product_line: 'ACESSORIOS', price: '41.4' }), // sem margem: 41,4 × 1,23 = 50,92 → 50,90 < custo+IVA → 51,90
 ];
 
 type StoredStates = Awaited<ReturnType<typeof loadSyncData>>['states'];
@@ -88,8 +88,9 @@ test('dry-run: decisão por produto', async () => {
 test('dry-run: verificações do resumo', async () => {
   const r = await run();
   assert.equal(r.checks.noMarginRule, 1);           // BELOW
-  assert.equal(r.checks.belowCostVat, 1);
-  assert.equal(r.checks.belowCostVatSample[0].sku, 'BELOW');
+  // BELOW: 41,4 × 1,23 = 50,92 → 50,90 ficaria abaixo de custo + IVA → sobe para 51,90
+  assert.equal(r.checks.belowCostVat, 0);
+  assert.equal(bySku(r.plan).get('BELOW')?.price, '51.90');
   // Ativos na loja em que o sync não toca: só o produto de outro fornecedor.
   assert.equal(r.checks.untouchedActive, 1);
   assert.deepEqual(r.checks.untouchedActiveSample.map((x: any) => x.sku), ['OUTRO-FORNECEDOR']);
