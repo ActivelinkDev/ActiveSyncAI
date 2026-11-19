@@ -61,7 +61,7 @@ test('dry-run: decisão por produto', async () => {
   assert.equal(upd.shopifyProductId, 1);
   assert.equal(upd.status, 'active');
   assert.equal(upd.price, '15.49');
-  assert.equal(upd.compareAtPrice, '30.00');
+  assert.equal(upd.compareAtPrice, null); // PVPR 30 nunca vai como preço riscado (Omnibus, 19/11)
   assert.equal(upd.cost, '10.00');
   assert.equal(upd.marginRule, 'percentage:20');
   assert.deepEqual(upd.collectionIds, ['101']);

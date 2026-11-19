@@ -2,8 +2,6 @@ import { Router } from "express";
 import { withConnectionSettings } from "../suprides/repositories/store";
 import { logLine } from "../utils/logger";
 import { sendAlert } from "./alerts";
-import { recordShopPrices } from "./price-history";
-import { readAllProducts } from "../suprides/api/shopify-read";
 import { loadAppState, updateAppState } from "../db/app-state";
 import { runSupridesImport, isImportRunning } from "../suprides/services/import-suprides";
 import { runFullShopifySync, isFullSyncRunning } from "../suprides/routes/sync";
@@ -64,22 +62,6 @@ async function saveRun(rec: RunRecord): Promise<void> {
   }
 }
 
-/** Lê a loja depois do sync e regista as mudanças de preço (regra dos 30 dias). */
-async function recordPricesAfterSync(): Promise<void> {
-  try {
-    const products = await readAllProducts();
-    const r = await recordShopPrices(products, new Date(), "SYNC");
-    logLine(r.skipped ? `[Preços] Histórico não gravado: ${r.skipped}` : `[Preços] Histórico: ${r.changes} mudança(s) registada(s)`);
-  } catch (e: any) {
-    logLine(`[Preços] FALHOU o registo do histórico: ${e?.message ?? e}`);
-    await sendAlert("price-history", "Histórico de preços não foi gravado",
-      `O sync correu, mas não foi possível registar os preços no SQL Server.
-Sem este registo, a regra dos 30 dias fica com falhas.
-
-Erro: ${e?.message ?? e}`);
-  }
-}
-
 export async function runDailySync(trigger: RunRecord["trigger"]): Promise<RunRecord> {
   const rec: RunRecord = { trigger, startedAt: new Date().toISOString(), ok: false };
 
@@ -115,7 +97,7 @@ export async function runDailySync(trigger: RunRecord["trigger"]): Promise<RunRe
       `Shopify ${rec.shopify.created} criados, ${rec.shopify.updated} atualizados, ${rec.shopify.errors} erros, ` +
       `${rec.shopify.noCostHidden} sem custo passados a draft`
     );
-    if (!r.cancelled) await recordPricesAfterSync();
+    // O histórico de preços é gravado pelo próprio runFullShopifySync.
     if (r.cancelled) {
       await sendAlert("sync-cancelled", "Sync diário cancelado", `A sincronização (${trigger}) foi cancelada antes de terminar. Retomar com run-sync / --resume.`);
     } else if (rec.shopify.errors > 0) {

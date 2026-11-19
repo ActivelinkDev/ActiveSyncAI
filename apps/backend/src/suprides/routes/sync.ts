@@ -1,4 +1,5 @@
 import { withCatalogueLock } from '../../repositories/suprides-cache';
+import { recordPricesFromShop } from '../../services/price-history';
 import { Router } from 'express';
 import { getAllProducts, buildFamiliasFromProducts } from '../services/products-cache';
 import { parseStockStatus, formatStockStatusLabel, type StockStatus } from '../api/suprides-api';
@@ -410,8 +411,16 @@ interface SyncOptions {
 }
 
 export function runFullShopifySync(opts: SyncOptions = {}, onStart?: () => void) {
-  const run = () => runSync(opts, onStart);
-  return opts.dryRun ? run() : withCatalogueLock(run);
+  if (opts.dryRun) return runSync(opts, onStart);
+  // Histórico de preços (regra dos 30 dias) depois de qualquer sync real, também cancelado ou
+  // com erro a meio: pode já ter havido preços enviados. Ainda dentro do lock, antes de outro sync.
+  return withCatalogueLock(async () => {
+    try {
+      return await runSync(opts, onStart);
+    } finally {
+      await recordPricesFromShop('SYNC', 'sync completo');
+    }
+  });
 }
 
 async function runSync(opts: SyncOptions, onStart?: () => void) {
@@ -681,10 +690,10 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
       if (rule) basePrice = applyMargin(basePrice, rule.mode, rule.marginValue);
       const finalPrice = applyRounding(basePrice * ivaMultiplier, settings.rounding);
 
-      // pvpr do fornecedor: passa direto, sem IVA. Só mostrar se maior que o nosso preço final.
-      const pvprRaw = p.pvpr ? parseFloat(normalizeMoney(p.pvpr)) || 0 : 0;
-      const price   = finalPrice.toFixed(2);
-      const pvpr    = pvprRaw > finalPrice ? pvprRaw.toFixed(2) : undefined;
+      const price = finalPrice.toFixed(2);
+      // Sem preço riscado fora de campanha (regra dos 30 dias / Omnibus, decisão 19/11): o PVPR do
+      // fornecedor nunca foi um preço praticado na loja. Continua guardado em products.msrp.
+      const compareAtPrice: string | null = null;
 
       const stockStatus = (p.stock_status as string) || parseStockStatus(p.stock);
       const title  = p.name || p.sku || 'Produto';
@@ -706,7 +715,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
         skippedNew.push(p.sku);
         if (dryRun) {
           plan.push({
-            sku: p.sku, action: 'skip-new', status, price, compareAtPrice: pvpr ?? null, cost: costPrice, stockStatus,
+            sku: p.sku, action: 'skip-new', status, price, compareAtPrice, cost: costPrice, stockStatus,
             marginRule: rule ? `${rule.mode}:${rule.marginValue}` : null, collectionIds,
           });
         }
@@ -744,7 +753,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
         filtros,
         collectionIds: await numericCollectionIds(),
         price,
-        compareAtPrice: pvpr ?? null,
+        compareAtPrice,
         barcode: p.ean || null,
         cost: costPrice,
         weightGrams,
@@ -754,7 +763,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
         // Criar (só com createNewProducts ligado).
         if (dryRun) {
           plan.push({
-            sku: p.sku, action: 'create', status, price, compareAtPrice: pvpr ?? null, cost: costPrice, stockStatus,
+            sku: p.sku, action: 'create', status, price, compareAtPrice, cost: costPrice, stockStatus,
             marginRule: rule ? `${rule.mode}:${rule.marginValue}` : null, collectionIds,
           });
           return;
@@ -785,7 +794,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
       if (dryRun) {
         plan.push({
           sku: p.sku, action: 'update', shopifyProductId: known.productId,
-          status, price, compareAtPrice: pvpr ?? null, cost: costPrice, stockStatus,
+          status, price, compareAtPrice, cost: costPrice, stockStatus,
           marginRule: rule ? `${rule.mode}:${rule.marginValue}` : null,
           collectionIds, changes: w.changes,
         });

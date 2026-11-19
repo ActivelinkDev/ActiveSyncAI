@@ -10,9 +10,11 @@
 import { sql } from 'kysely';
 import { getMssql, mssqlConfigured } from '../db/mssql';
 import { migrateMssql } from '../db/mssql-migrations';
-import type { SnapshotProduct } from '../suprides/api/shopify-read';
+import { readAllProducts, type SnapshotProduct } from '../suprides/api/shopify-read';
+import { logLine } from '../utils/logger';
+import { sendAlert } from './alerts';
 
-export type PriceSource = 'INITIAL' | 'SNAPSHOT' | 'SYNC' | 'CAMPAIGN' | 'CAMPAIGN_END';
+export type PriceSource = 'INITIAL' | 'SNAPSHOT' | 'SYNC' | 'RESTORE' | 'CAMPAIGN' | 'CAMPAIGN_END';
 
 export interface CurrentPrice { price: number; compareAt: number | null }
 export interface PriceChange {
@@ -130,6 +132,28 @@ export async function recordShopPrices(products: SnapshotProduct[], at: Date, so
     }
   });
   return { changes: changes.length };
+}
+
+/**
+ * Lê a loja e regista as mudanças de preço. Chamar depois de QUALQUER escrita de preços na loja
+ * (sync completo, mesmo cancelado ou com erros; reposição). Nunca lança: uma falha só gera alerta,
+ * para não estragar o resultado de quem escreveu. `search` = filtro da Shopify (ex.: só alguns SKUs).
+ */
+export async function recordPricesFromShop(source: PriceSource, context: string, search?: string): Promise<void> {
+  try {
+    const products = await readAllProducts(undefined, search);
+    const r = await recordShopPrices(products, new Date(), source);
+    logLine(r.skipped
+      ? `[Preços] Histórico não gravado (${context}): ${r.skipped}`
+      : `[Preços] Histórico (${context}): ${r.changes} mudança(s) registada(s)`);
+  } catch (e: any) {
+    logLine(`[Preços] FALHOU o registo do histórico (${context}): ${e?.message ?? e}`);
+    await sendAlert('price-history', 'Histórico de preços não foi gravado',
+      `Houve escritas de preços na loja (${context}), mas não foi possível registá-las no SQL Server.
+Sem este registo, a regra dos 30 dias fica com falhas.
+
+Erro: ${e?.message ?? e}`);
+  }
 }
 
 /** Preço mais baixo dos últimos 30 dias de um SKU (para as campanhas). */
