@@ -1,0 +1,248 @@
+<div class="cp">
+
+  <!-- CABEÇALHO -->
+  <div class="cp-header">
+    <button *ngIf="view === 'detail'" mat-icon-button matTooltip="Voltar à lista" (click)="back()">
+      <mat-icon>arrow_back</mat-icon>
+    </button>
+    <mat-icon class="cp-icon">local_offer</mat-icon>
+    <span class="cp-title">
+      Campanhas<ng-container *ngIf="view === 'detail'"> · {{ campaign ? campaign.name : 'Nova campanha' }}</ng-container>
+    </span>
+    <span *ngIf="view === 'detail' && campaign" class="chip" [ngClass]="'chip--' + campaign.status">{{ statusLabel[campaign.status] }}</span>
+    <button mat-icon-button matTooltip="Fechar" (click)="close()"><mat-icon>close</mat-icon></button>
+  </div>
+
+  <mat-progress-bar *ngIf="loading || busy" mode="indeterminate"></mat-progress-bar>
+
+  <!-- AVISOS GERAIS -->
+  <div class="cp-notes" *ngIf="status">
+    <div class="note note--warn" *ngIf="!status.tickerEnabled">
+      <mat-icon>schedule</mat-icon>
+      <span>O temporizador das campanhas está desligado neste servidor: as campanhas agendadas não começam nem terminam aqui
+        (liga-se no servidor com <code>CAMPAIGN_TICKER_ENABLED=1</code>).</span>
+    </div>
+    <div class="note" *ngIf="status.validFrom">
+      <mat-icon>history</mat-icon>
+      <span>Histórico de preços desde {{ date(status.historySince) }}: os 30 dias completam-se a
+        <strong>{{ date(status.validFrom) }}</strong>. Antes disso, a referência só conta com o histórico que existe.</span>
+    </div>
+  </div>
+
+  <div class="cp-msg cp-msg--error" *ngIf="error"><mat-icon>error_outline</mat-icon><span>{{ error }}</span></div>
+  <div class="cp-msg cp-msg--ok" *ngIf="info && !error"><mat-icon>check_circle</mat-icon><span>{{ info }}</span></div>
+
+  <!-- ═══ LISTA ═══ -->
+  <div class="cp-body" *ngIf="view === 'list'">
+    <div class="toolbar">
+      <button mat-flat-button color="primary" (click)="newCampaign()"><mat-icon>add</mat-icon> Nova campanha</button>
+    </div>
+
+    <div class="empty" *ngIf="!loading && !campaigns.length">
+      Ainda não há campanhas. Uma campanha baixa o preço de vários produtos entre duas datas, sempre abaixo do preço
+      mais baixo dos últimos 30 dias e nunca abaixo de custo + IVA.
+    </div>
+
+    <table class="grid" *ngIf="campaigns.length">
+      <thead>
+        <tr><th>Nome</th><th>Estado</th><th>Desconto</th><th>Início</th><th>Fim</th><th class="num">Produtos</th><th></th></tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let c of campaigns" class="clickable" (click)="open(c.id)">
+          <td class="strong">{{ c.name }}</td>
+          <td><span class="chip" [ngClass]="'chip--' + c.status">{{ statusLabel[c.status] }}</span></td>
+          <td>{{ discountText({ type: c.discountType, value: c.discountValue }) }}</td>
+          <td>{{ date(c.startsAt) }}</td>
+          <td>{{ date(c.endsAt) }}</td>
+          <td class="num">
+            {{ c.products }}
+            <span class="sub" *ngIf="c.startedAt">({{ c.included }} em promoção<ng-container *ngIf="c.blocked">, {{ c.blocked }} bloq.</ng-container>)</span>
+          </td>
+          <td>
+            <span class="badge badge--bad" *ngIf="c.withdrawn" [matTooltip]="c.withdrawn + ' produto(s) retirado(s) por prejuízo (o custo subiu)'">
+              <mat-icon>trending_down</mat-icon>{{ c.withdrawn }} retirado(s)
+            </span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ═══ DETALHE ═══ -->
+  <div class="cp-body" *ngIf="view === 'detail' && !loading">
+
+    <!-- Dados -->
+    <section class="card">
+      <div class="form">
+        <label class="f f--wide">Nome
+          <input [(ngModel)]="form.name" [disabled]="!editable" maxlength="200" placeholder="Ex.: Black Friday">
+        </label>
+        <label class="f">Desconto
+          <span class="inline">
+            <input type="number" [(ngModel)]="form.discountValue" [disabled]="!editable" min="0.01" step="0.01">
+            <mat-select [(ngModel)]="form.discountType" [disabled]="!editable" class="sel-type">
+              <mat-option value="PERCENT">%</mat-option>
+              <mat-option value="AMOUNT">€</mat-option>
+            </mat-select>
+          </span>
+        </label>
+        <label class="f">Início <input type="datetime-local" [(ngModel)]="form.startsAt" [disabled]="!editable"></label>
+        <label class="f">Fim <input type="datetime-local" [(ngModel)]="form.endsAt" [disabled]="!editable"></label>
+        <label class="f f--wide">Notas <input [(ngModel)]="form.notes" [disabled]="!editable" maxlength="1000"></label>
+      </div>
+      <div class="hint">O preço promocional arredonda para baixo ao cêntimo. Um produto só entra se ficar abaixo do preço mais
+        baixo dos últimos 30 dias e acima de custo + IVA; o preço riscado na loja é esse preço dos 30 dias.</div>
+
+      <div class="actions">
+        <button mat-flat-button color="primary" *ngIf="editable" [disabled]="busy" (click)="save()">
+          <mat-icon>save</mat-icon> {{ campaign ? 'Guardar' : 'Criar' }}
+        </button>
+        <ng-container *ngIf="campaign">
+          <button mat-stroked-button *ngIf="campaign.status === 'RASCUNHO'" [disabled]="busy || !rows.length || !counts.INCLUIDO" (click)="schedule()"
+            matTooltip="Fica à espera da data de início; no início os valores são recalculados e enviados para a loja">
+            <mat-icon>event_available</mat-icon> Agendar
+          </button>
+          <button mat-stroked-button *ngIf="campaign.status === 'AGENDADA'" [disabled]="busy" (click)="unschedule()">
+            <mat-icon>edit_calendar</mat-icon> Voltar a rascunho
+          </button>
+          <button mat-stroked-button class="danger" *ngIf="['RASCUNHO','AGENDADA','ATIVA'].includes(campaign.status)" [disabled]="busy" (click)="cancel()">
+            <mat-icon>block</mat-icon> Cancelar campanha
+          </button>
+          <button mat-button class="danger" *ngIf="campaign.status === 'RASCUNHO'" [disabled]="busy" (click)="remove()">
+            <mat-icon>delete</mat-icon> Apagar
+          </button>
+          <span class="meta">
+            <ng-container *ngIf="campaign.startedAt">Iniciada {{ date(campaign.startedAt) }}</ng-container>
+            <ng-container *ngIf="campaign.endedAt"> · Fechada {{ date(campaign.endedAt) }}</ng-container>
+          </span>
+        </ng-container>
+      </div>
+    </section>
+
+    <!-- Produtos -->
+    <section class="card" *ngIf="campaign">
+      <div class="card-head">
+        <span class="card-title">Produtos</span>
+        <span class="count count--ok">{{ counts.INCLUIDO }} em promoção</span>
+        <span class="count count--bad" *ngIf="counts.BLOQUEADO">{{ counts.BLOQUEADO }} bloqueados</span>
+        <span class="count count--bad" *ngIf="counts.RETIRADO">{{ counts.RETIRADO }} retirados</span>
+        <span class="count count--warn" *ngIf="counts.AVISO">{{ counts.AVISO }} com aviso</span>
+        <span class="spacer"></span>
+        <span class="sub" *ngIf="!fixedValues && rows.length">Pré-visualização com os preços de hoje</span>
+        <span class="sub" *ngIf="fixedValues">Valores fixados no início</span>
+        <button mat-stroked-button *ngIf="editable" (click)="toggleSelection()">
+          <mat-icon>{{ showSelection ? 'expand_less' : 'playlist_add' }}</mat-icon> Acrescentar produtos
+        </button>
+        <button mat-button *ngIf="editable && counts.BLOQUEADO" [disabled]="busy" (click)="removeVisibleBlocked()">Retirar bloqueados</button>
+      </div>
+
+      <!-- Seleção -->
+      <div class="selection" *ngIf="showSelection && editable">
+        <div class="form">
+          <label class="f">Marca
+            <mat-select [(ngModel)]="sel.brand"><mat-option value="">Todas</mat-option>
+              <mat-option *ngFor="let b of options?.brands" [value]="b">{{ b }}</mat-option></mat-select>
+          </label>
+          <label class="f">Linha
+            <mat-select [(ngModel)]="sel.productLine"><mat-option value="">Todas</mat-option>
+              <mat-option *ngFor="let b of options?.productLines" [value]="b">{{ b }}</mat-option></mat-select>
+          </label>
+          <label class="f">Família
+            <mat-select [(ngModel)]="sel.family"><mat-option value="">Todas</mat-option>
+              <mat-option *ngFor="let b of options?.families" [value]="b">{{ b }}</mat-option></mat-select>
+          </label>
+          <label class="f">Stock
+            <mat-select [(ngModel)]="sel.stockStatus"><mat-option value="">Todos</mat-option>
+              <mat-option *ngFor="let b of options?.stockStatuses" [value]="b">{{ b }}</mat-option></mat-select>
+          </label>
+          <label class="f">Nome ou SKU <input [(ngModel)]="sel.text" (keyup.enter)="search()"></label>
+          <label class="f f--wide">SKUs colados (um por linha, ou separados por vírgulas)
+            <textarea rows="2" [(ngModel)]="sel.skus" placeholder="SUP0001234&#10;SUP0005678"></textarea>
+          </label>
+        </div>
+        <div class="actions">
+          <mat-checkbox [(ngModel)]="sel.onlyManaged">Só produtos na loja com preço gerido</mat-checkbox>
+          <button mat-stroked-button [disabled]="busy" (click)="search()"><mat-icon>search</mat-icon> Procurar</button>
+          <ng-container *ngIf="searched">
+            <span class="sub">{{ found.length }} encontrado(s){{ foundTruncated ? ' (limite atingido: afina os filtros)' : '' }},
+              {{ newFound.length }} novo(s)</span>
+            <button mat-flat-button color="primary" [disabled]="busy || !newFound.length" (click)="addFound()">
+              <mat-icon>add</mat-icon> Acrescentar {{ newFound.length }}
+            </button>
+          </ng-container>
+        </div>
+      </div>
+
+      <div class="empty" *ngIf="!rows.length">Sem produtos.</div>
+
+      <ng-container *ngIf="rows.length">
+        <div class="toolbar">
+          <input class="filter" [(ngModel)]="rowFilter" placeholder="Filtrar por SKU, nome ou marca">
+          <mat-select [(ngModel)]="stateFilter" class="sel-state">
+            <mat-option value="">Todos</mat-option>
+            <mat-option value="INCLUIDO">Em promoção</mat-option>
+            <mat-option value="BLOQUEADO">Bloqueados</mat-option>
+            <mat-option value="RETIRADO">Retirados</mat-option>
+            <mat-option value="AVISO">Com aviso</mat-option>
+          </mat-select>
+        </div>
+
+        <div class="grid-wrap">
+          <table class="grid">
+            <thead>
+              <tr>
+                <th>SKU</th><th>Produto</th>
+                <th class="num">Preço base</th><th class="num" matTooltip="Preço mais baixo dos últimos 30 dias (fica como preço riscado)">Mín. 30 dias</th>
+                <th class="num">Promocional</th><th>Estado</th>
+                <th *ngIf="!fixedValues">Desconto válido</th><th>Desconto</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let r of visibleRows | slice:0:rowLimit" [class.row--blocked]="r.state !== 'INCLUIDO'">
+                <td class="mono">{{ r.sku }}</td>
+                <td><div class="name">{{ r.name }}</div><div class="sub">{{ r.brand }}</div></td>
+                <td class="num">{{ eur(r.base) }}</td>
+                <td class="num">{{ eur(r.reference) }}</td>
+                <td class="num strong">{{ eur(r.promo) }}</td>
+                <td>
+                  <span class="chip" [ngClass]="'chip--' + r.state" [matTooltip]="r.reason ? (reasonLabel[r.reason] || r.reason) : ''">
+                    {{ r.state === 'INCLUIDO' ? (r.applied ? 'Na loja' : 'Em promoção') : r.state === 'BLOQUEADO' ? 'Bloqueado' : 'Retirado' }}
+                  </span>
+                  <mat-icon *ngIf="r.warning" class="warn-icon" [matTooltip]="warningLabel[r.warning] || r.warning">warning_amber</mat-icon>
+                  <div class="sub" *ngIf="r.reason">{{ reasonLabel[r.reason] || r.reason }}</div>
+                </td>
+                <td *ngIf="!fixedValues" class="sub">{{ rangeText(r.range) }}</td>
+                <td>
+                  <ng-container *ngIf="!r.editing">
+                    <span [class.override]="r.override">{{ r.override ? discountText(r.override) : discountText({ type: form.discountType, value: form.discountValue || 0 }) }}</span>
+                    <button mat-icon-button *ngIf="overridesEditable" matTooltip="Exceção para este produto" (click)="editOverride(r)">
+                      <mat-icon>tune</mat-icon>
+                    </button>
+                  </ng-container>
+                  <span class="inline" *ngIf="r.editing">
+                    <input type="number" class="small" [(ngModel)]="r.editValue" min="0.01" step="0.01">
+                    <mat-select [(ngModel)]="r.editType" class="sel-type">
+                      <mat-option value="PERCENT">%</mat-option><mat-option value="AMOUNT">€</mat-option>
+                    </mat-select>
+                    <button mat-icon-button matTooltip="Guardar exceção" [disabled]="busy" (click)="saveOverride(r)"><mat-icon>check</mat-icon></button>
+                    <button mat-icon-button *ngIf="r.override" matTooltip="Usar o desconto da campanha" [disabled]="busy" (click)="saveOverride(r, true)"><mat-icon>undo</mat-icon></button>
+                    <button mat-icon-button matTooltip="Cancelar" (click)="r.editing = false"><mat-icon>close</mat-icon></button>
+                  </span>
+                </td>
+                <td>
+                  <button mat-icon-button *ngIf="editable" matTooltip="Retirar da campanha" [disabled]="busy" (click)="removeRow(r)">
+                    <mat-icon>remove_circle_outline</mat-icon>
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="more" *ngIf="visibleRows.length > rowLimit">
+          <span class="sub">A mostrar {{ rowLimit }} de {{ visibleRows.length }}</span>
+          <button mat-button (click)="rowLimit = rowLimit + 300">Mostrar mais</button>
+        </div>
+      </ng-container>
+    </section>
+  </div>
+</div>

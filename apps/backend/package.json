@@ -9,7 +9,7 @@
     "shopify:snapshot": "ts-node-dev --transpile-only --exit-child src/scripts/shopify-snapshot.ts",
     "shopify:restore": "ts-node-dev --transpile-only --exit-child src/scripts/shopify-restore.ts",
     "sync:verify": "ts-node-dev --transpile-only --exit-child src/scripts/sync-verify.ts",
-    "test": "node --require ts-node/register/transpile-only --test \"src/**/*.test.ts\"",
+    "test": "node --require ts-node/register/transpile-only --test --test-concurrency=1 \"src/**/*.test.ts\"",
     "sync:run": "ts-node --transpile-only src/scripts/sync-run.ts",
     "images:run": "ts-node --transpile-only src/scripts/images-run.ts",
     "images:dedupe": "ts-node --transpile-only src/scripts/images-dedupe.ts",

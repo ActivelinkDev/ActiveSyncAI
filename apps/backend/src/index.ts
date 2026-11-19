@@ -9,6 +9,7 @@ import logsRouter from "./routes/logs";
 import dashboardRoutes from "./routes/dashboard";
 import systemStatsRouter, { systemInfoRouter } from "./routes/system-stats";
 import supridesRouter from "./suprides/index";
+import campaignsRouter from "./routes/campaigns";
 import { migrateMssql } from "./db/mssql-migrations";
 import { startCampaignTicker } from "./services/campaign-ticker";
 import { closeMssql } from "./db/mssql";
@@ -75,6 +76,7 @@ app.use("/api/system/stats", systemStatsRouter);
 app.use("/api/system/info",  systemInfoRouter);
 app.use("/api/suprides",     supridesRouter);
 app.use("/api/scheduler",    schedulerRouter);
+app.use("/api/campanhas",    campaignsRouter);
 app.use("/api", (_req, res) => { res.status(404).json({ error: "not_found" }); });
 
 // 5. Interface (Angular) servida pelo próprio backend.

@@ -107,6 +107,9 @@ export const DANGEROUS: { method: string; path: RegExp; label: string }[] = [
   { method: 'POST', path: /^\/api\/suprides\/menu\/sync$/, label: 'Menu na Shopify' },
   { method: 'POST', path: /^\/api\/suprides\/public-menu\/publish$/, label: 'Publicar menu na Shopify' },
   { method: 'POST', path: /^\/api\/scheduler\/run-now$/, label: 'Executar agora (importação + sync)' },
+  { method: 'POST', path: /^\/api\/campanhas\/\d+\/agendar$/, label: 'Agendar campanha (preços na loja)' },
+  { method: 'POST', path: /^\/api\/campanhas\/\d+\/desagendar$/, label: 'Desagendar campanha' },
+  { method: 'POST', path: /^\/api\/campanhas\/\d+\/cancelar$/, label: 'Cancelar campanha (repõe preços na loja)' },
   { method: 'PUT', path: /^\/api\/suprides\/admin\/(connection|settings)$/, label: 'Alterar ligações/definições' },
 ];
 

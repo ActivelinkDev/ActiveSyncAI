@@ -8,6 +8,7 @@
   <div class="menu no-drag">
     <button mat-button (click)="openSupridesMapeamento()">Coleções</button>
     <button mat-button (click)="openSupridesMargens()">Margens</button>
+    <button mat-button (click)="openCampaigns()">Campanhas</button>
     <button mat-icon-button (click)="openPreferences()" matTooltip="Definições" class="btn-settings no-drag">
       <mat-icon>settings</mat-icon>
     </button>
@@ -47,6 +48,11 @@
     <button mat-raised-button class="ribbon-btn ribbon-btn--suprides-margins" (click)="openSupridesMargens()">
       <mat-icon>percent</mat-icon>
       <span>MARGENS B2C</span>
+    </button>
+
+    <button mat-raised-button class="ribbon-btn ribbon-btn--campaigns" (click)="openCampaigns()">
+      <mat-icon>local_offer</mat-icon>
+      <span>CAMPANHAS</span>
     </button>
 
     <button mat-raised-button class="ribbon-btn ribbon-btn--maptags" (click)="openFiltrosTags()">

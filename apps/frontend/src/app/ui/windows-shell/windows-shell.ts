@@ -10,6 +10,7 @@ import { PreferencesDialog } from '../../pages/preferences/preferences-dialog';
 import { TagsDialog } from '../../pages/tags/tags-dialog';
 import { SupridesMapeamentoDialog } from '../../pages/suprides/mapeamento/suprides-mapeamento-dialog';
 import { SupridesMargensDialog } from '../../pages/suprides/margens/suprides-margens-dialog';
+import { CampaignsDialog } from '../../pages/campaigns/campaigns-dialog';
 import { interval, Subscription } from 'rxjs';
 
 declare global {
@@ -136,6 +137,13 @@ export class WindowsShellComponent implements OnInit, OnDestroy {
     this.dialog.open(SupridesMargensDialog, {
       width: '860px', maxWidth: '96vw', height: '90vh',
       panelClass: ['b2b-dialog', 'suprides-margens-dialog']
+    });
+  }
+
+  openCampaigns(): void {
+    this.dialog.open(CampaignsDialog, {
+      width: '1200px', maxWidth: '98vw', height: '92vh', maxHeight: '92vh',
+      panelClass: ['b2b-dialog', 'campaigns-dialog']
     });
   }
 

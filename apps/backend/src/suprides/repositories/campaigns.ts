@@ -119,14 +119,22 @@ function requireStatus(c: Campaign, allowed: CampaignStatus[], action: string): 
 
 // ── Leitura ──────────────────────────────────────────────────────────────────
 
-export async function listCampaigns(db: Db = getMssql()): Promise<(Campaign & { products: number; included: number })[]> {
+export interface CampaignSummary extends Campaign { products: number; included: number; blocked: number; withdrawn: number }
+
+export async function listCampaigns(db: Db = getMssql()): Promise<CampaignSummary[]> {
   const rows = await sql<any>`
-    SELECT c.*, COUNT(cp.sku) AS products, SUM(CASE WHEN cp.state = 'INCLUIDO' THEN 1 ELSE 0 END) AS included
+    SELECT c.*, COUNT(cp.sku) AS products,
+      SUM(CASE WHEN cp.state = 'INCLUIDO' THEN 1 ELSE 0 END) AS included,
+      SUM(CASE WHEN cp.state = 'BLOQUEADO' THEN 1 ELSE 0 END) AS blocked,
+      SUM(CASE WHEN cp.state = 'RETIRADO' THEN 1 ELSE 0 END) AS withdrawn
     FROM campaigns c LEFT JOIN campaign_products cp ON cp.campaign_id = c.id
     GROUP BY c.id, c.name, c.status, c.discount_type, c.discount_value, c.starts_at, c.ends_at, c.notes,
              c.created_at, c.scheduled_at, c.started_at, c.ended_at
     ORDER BY c.starts_at DESC, c.id DESC`.execute(db);
-  return rows.rows.map(r => ({ ...toCampaign(r), products: Number(r.products ?? 0), included: Number(r.included ?? 0) }));
+  return rows.rows.map(r => ({
+    ...toCampaign(r), products: Number(r.products ?? 0), included: Number(r.included ?? 0),
+    blocked: Number(r.blocked ?? 0), withdrawn: Number(r.withdrawn ?? 0),
+  }));
 }
 
 export async function getCampaign(id: number, db: Db = getMssql()): Promise<Campaign & { products: CampaignProductRow[] }> {
@@ -434,4 +442,82 @@ export async function withdrawLossMakers(now = new Date(), db: Db = getMssql()):
     out.push({ campaignId: r.campaign_id, sku: r.sku });
   }
   return out;
+}
+
+// ── Seleção de produtos (interface) ──────────────────────────────────────────
+
+export interface ProductFilters {
+  brand?: string; productLine?: string; family?: string; stockStatus?: string;
+  /** Texto no nome ou no SKU. */
+  text?: string;
+  /** SKUs colados (um por linha, vírgulas ou espaços). */
+  skus?: string[];
+  /** Só produtos com preço gerido pelo sync e presentes na loja (por omissão true). */
+  onlyManaged?: boolean;
+}
+
+export interface ProductInfo {
+  sku: string; name: string | null; brand: string | null; productLine: string | null; family: string | null;
+  stockStatus: string | null; cost: number | null; basePrice: number | null; inShop: boolean;
+}
+
+export const SELECTION_LIMIT = 5000;
+
+const toInfo = (r: any): ProductInfo => ({
+  sku: r.sku, name: r.name ?? null, brand: r.brand ?? null, productLine: r.product_line ?? null, family: r.family ?? null,
+  stockStatus: r.stock_status ?? null, cost: num(r.cost), basePrice: num(r.base_price),
+  inShop: !!(r.shopify_product_id && r.shopify_variant_id),
+});
+
+const INFO_COLUMNS = ['sku', 'name', 'brand', 'product_line', 'family', 'stock_status', 'cost', 'base_price',
+  'shopify_product_id', 'shopify_variant_id'] as const;
+
+/** Produtos que cumprem os filtros (máx. SELECTION_LIMIT; `truncated` se houver mais). */
+export async function searchProducts(f: ProductFilters, db: Db = getMssql()): Promise<{ products: ProductInfo[]; truncated: boolean }> {
+  let q = db.selectFrom('products').select([...INFO_COLUMNS]).where('removed_at', 'is', null);
+  if (f.onlyManaged !== false) {
+    q = q.where('base_price', 'is not', null).where('shopify_product_id', 'is not', null).where('shopify_variant_id', 'is not', null);
+  }
+  if (f.brand) q = q.where('brand', '=', f.brand);
+  if (f.productLine) q = q.where('product_line', '=', f.productLine);
+  if (f.family) q = q.where('family', '=', f.family);
+  if (f.stockStatus) q = q.where('stock_status', '=', f.stockStatus);
+  if (f.text?.trim()) {
+    const like = `%${f.text.trim().replace(/[\%_[]/g, ch => `[${ch}]`)}%`;
+    q = q.where(eb => eb.or([eb('name', 'like', like), eb('sku', 'like', like)]));
+  }
+  const skus = [...new Set((f.skus ?? []).map(s => String(s).trim()).filter(Boolean))];
+  if (skus.length) {
+    if (skus.length > 2000) throw new CampaignError('No máximo 2000 SKUs colados de cada vez.', 'INVALID');
+    q = q.where('sku', 'in', skus);
+  }
+  const rows = await q.orderBy('brand').orderBy('name').top(SELECTION_LIMIT + 1).execute();
+  return { products: rows.slice(0, SELECTION_LIMIT).map(toInfo), truncated: rows.length > SELECTION_LIMIT };
+}
+
+/** Valores para os filtros da seleção (marcas, linhas, famílias, estados de stock). */
+export async function productFilterOptions(db: Db = getMssql()) {
+  const distinct = async (col: 'brand' | 'product_line' | 'family' | 'stock_status') =>
+    (await db.selectFrom('products').select(col).distinct().where(col, 'is not', null).where('removed_at', 'is', null)
+      .orderBy(col).execute()).map((r: any) => r[col] as string).filter(Boolean);
+  const [brands, productLines, families, stockStatuses] = await Promise.all([
+    distinct('brand'), distinct('product_line'), distinct('family'), distinct('stock_status'),
+  ]);
+  return { brands, productLines, families, stockStatuses };
+}
+
+/** Nome, marca e preço atual dos produtos de uma campanha (para o detalhe). */
+export async function productInfo(skus: string[], db: Db = getMssql()): Promise<Map<string, ProductInfo>> {
+  const out = new Map<string, ProductInfo>();
+  for (let i = 0; i < skus.length; i += 1000) {
+    const rows = await db.selectFrom('products').select([...INFO_COLUMNS]).where('sku', 'in', skus.slice(i, i + 1000)).execute();
+    for (const r of rows) out.set(r.sku, toInfo(r));
+  }
+  return out;
+}
+
+/** Desde quando há histórico de preços (regra dos 30 dias: campanhas válidas 30 dias depois). */
+export async function historyStartedAt(db: Db = getMssql()): Promise<Date | null> {
+  const r: any = await db.selectFrom('price_history').select(sql`MIN(changed_at)`.as('m')).executeTakeFirst();
+  return r?.m ? new Date(r.m) : null;
 }
