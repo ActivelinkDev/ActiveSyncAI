@@ -25,7 +25,8 @@
     <div class="note" *ngIf="status.validFrom">
       <mat-icon>history</mat-icon>
       <span>Histórico de preços desde {{ date(status.historySince) }}: os 30 dias completam-se a
-        <strong>{{ date(status.validFrom) }}</strong>. Antes disso, a referência só conta com o histórico que existe.</span>
+        <strong>{{ date(status.validFrom) }}</strong>. Até lá podes criar e agendar campanhas na mesma: o preço de referência
+        (riscado) é o mais baixo do histórico que já existe, e os produtos ficam com o aviso "histórico curto".</span>
     </div>
   </div>
 
@@ -120,6 +121,18 @@
     </section>
 
     <!-- Produtos -->
+    <!-- Campanha nova: os produtos entram depois de guardar os dados -->
+    <section class="card" *ngIf="!campaign">
+      <div class="card-head">
+        <span class="card-title">Produtos</span>
+        <span class="spacer"></span>
+        <button mat-flat-button color="primary" [disabled]="busy" (click)="save()">
+          <mat-icon>playlist_add</mat-icon> Criar e acrescentar produtos
+        </button>
+      </div>
+      <div class="hint">Preenche os dados acima; ao criar, abre-se logo a seleção de produtos (por marca, linha, família, stock, nome ou SKUs colados).</div>
+    </section>
+
     <section class="card" *ngIf="campaign">
       <div class="card-head">
         <span class="card-title">Produtos</span>
