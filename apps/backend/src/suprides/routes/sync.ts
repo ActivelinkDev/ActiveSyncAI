@@ -1,5 +1,6 @@
 import { withCatalogueLock } from '../../repositories/suprides-cache';
 import { recordPricesFromShop } from '../../services/price-history';
+import { syncBrandsAfterSync } from '../../services/brands-sync';
 import { Router } from 'express';
 import { getAllProducts, buildFamiliasFromProducts } from '../services/products-cache';
 import { parseStockStatus, formatStockStatusLabel, type StockStatus } from '../api/suprides-api';
@@ -413,7 +414,9 @@ export function runFullShopifySync(opts: SyncOptions = {}, onStart?: () => void)
     try {
       return await runSync(opts, onStart);
     } finally {
-      await recordPricesFromShop('SYNC', 'sync completo', undefined, () => campaignAttribution());
+      const shop = await recordPricesFromShop('SYNC', 'sync completo', undefined, () => campaignAttribution());
+      // Marcas da homepage (metaobjects "marca"): só as que têm produtos à venda.
+      await syncBrandsAfterSync(shop);
     }
   });
 }

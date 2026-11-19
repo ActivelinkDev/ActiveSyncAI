@@ -145,12 +145,14 @@ export async function recordShopPrices(
  * Lê a loja e regista as mudanças de preço. Chamar depois de QUALQUER escrita de preços na loja
  * (sync completo, mesmo cancelado ou com erros; reposição). Nunca lança: uma falha só gera alerta,
  * para não estragar o resultado de quem escreveu. `search` = filtro da Shopify (ex.: só alguns SKUs).
+ * Devolve os produtos lidos (null se a leitura falhou), para reaproveitar (ex.: marcas).
  */
 export async function recordPricesFromShop(
   source: PriceSource, context: string, search?: string, attribution?: () => Promise<PriceAttribution>,
-): Promise<void> {
+): Promise<SnapshotProduct[] | null> {
+  let products: SnapshotProduct[] | null = null;
   try {
-    const products = await readAllProducts(undefined, search);
+    products = await readAllProducts(undefined, search);
     const r = await recordShopPrices(products, new Date(), source, attribution ? await attribution() : undefined);
     logLine(r.skipped
       ? `[Preços] Histórico não gravado (${context}): ${r.skipped}`
@@ -163,6 +165,7 @@ Sem este registo, a regra dos 30 dias fica com falhas.
 
 Erro: ${e?.message ?? e}`);
   }
+  return products;
 }
 
 /** Preço mais baixo dos últimos 30 dias de um SKU (para as campanhas). */
