@@ -8,7 +8,6 @@ import type {
   MenuNode, CollectionMargins, PublicMenuFile, PublicMenuStats,
 } from '../types';
 
-const supplier = 'suprides';
 const levels = ['menu', 'familia', 'subfamilia'] as const;
 type Db = Kysely<any>;
 type Row = Record<string, any>;
@@ -43,9 +42,9 @@ export async function saveCollectionMargins(data: CollectionMargins): Promise<vo
 
 export async function loadMappings(): Promise<Mappings> {
   return transaction(async db => {
-    const lines = await db.selectFrom('line_mappings').selectAll().where('supplier', '=', supplier).orderBy('position').execute();
-    const targets = await db.selectFrom('line_to_menu').selectAll().where('supplier', '=', supplier).orderBy('position').orderBy('product_line').execute();
-    const families = await db.selectFrom('family_mappings').selectAll().where('supplier', '=', supplier).orderBy('position').execute();
+    const lines = await db.selectFrom('line_mappings').selectAll().orderBy('position').execute();
+    const targets = await db.selectFrom('line_to_menu').selectAll().orderBy('position').orderBy('product_line').execute();
+    const families = await db.selectFrom('family_mappings').selectAll().orderBy('position').execute();
     return {
       suprides: lines.map(r => ({ product_line: r.product_line, active: !!r.active,
         ...(r.menu_item == null ? {} : { menuItem: r.menu_item }) })),
@@ -60,16 +59,16 @@ export async function loadMappings(): Promise<Mappings> {
 export async function saveMappings(data: Mappings): Promise<void> {
   await transaction(async db => {
     for (const table of ['line_mappings', 'line_to_menu', 'family_mappings']) {
-      await db.deleteFrom(table).where('supplier', '=', supplier).execute();
+      await db.deleteFrom(table).execute();
     }
     await insertRows(db, 'line_mappings', (data.suprides ?? []).map((l, position) => ({
-      supplier, position, product_line: l.product_line, active: Number(l.active !== false), menu_item: l.menuItem ?? null,
+      position, product_line: l.product_line, active: Number(l.active !== false), menu_item: l.menuItem ?? null,
     })));
     await insertRows(db, 'line_to_menu', Object.entries(data.lineToMenu ?? {}).map(([line, target], position) => ({
-      supplier, product_line: line, menu_target: target, position,
+      product_line: line, menu_target: target, position,
     })));
     await insertRows(db, 'family_mappings', (data.familyMappings ?? []).map((f, position) => ({
-      supplier, position, product_line: f.product_line, family: f.family, active: Number(f.active !== false),
+      position, product_line: f.product_line, family: f.family, active: Number(f.active !== false),
       shopify_level2: f.shopifyLevel2 ?? null, shopify_level3: f.shopifyLevel3 ?? null,
     })));
   });
@@ -149,7 +148,7 @@ export async function saveCustomPrompt(instructions: string): Promise<void> {
 
 export async function loadShopifyCollectionMapping(): Promise<ShopifyCollectionMapping> {
   return transaction(async db => {
-    const rows = await db.selectFrom('collection_mapping').selectAll().where('supplier', '=', supplier)
+    const rows = await db.selectFrom('collection_mapping').selectAll()
       .orderBy('level').orderBy('source_position').orderBy('source_key').orderBy('position').execute();
     const hidden = await db.selectFrom('collection_mapping_hidden').select('hidden_key').execute();
     const map: ShopifyCollectionMapping = { menu: {}, familia: {}, subfamilia: {} };
@@ -170,13 +169,13 @@ export async function loadShopifyCollectionMapping(): Promise<ShopifyCollectionM
 
 export async function saveShopifyCollectionMapping(data: ShopifyCollectionMapping): Promise<void> {
   await transaction(async db => {
-    await db.deleteFrom('collection_mapping').where('supplier', '=', supplier).execute();
+    await db.deleteFrom('collection_mapping').execute();
     await db.deleteFrom('collection_mapping_hidden').execute();
     const rows: Row[] = [];
     for (const level of levels) {
       Object.entries(data[level]).forEach(([key, values], sourcePosition) => {
         [...new Set(values)].forEach((value, position) => rows.push({
-          supplier, level, source_key: key, source_position: sourcePosition, collection_id: value, position,
+          level, source_key: key, source_position: sourcePosition, collection_id: value, position,
         }));
       });
     }

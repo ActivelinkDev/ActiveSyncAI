@@ -32,7 +32,6 @@ Copiar `apps/backend/.env.example` para `apps/backend/.env` e preencher.
 | `npm run dev` | Servidor em modo desenvolvimento (porta 3004) |
 | `npm run build` / `npm start` | Compilar e arrancar a versão compilada |
 | `npm run db:migrate` | Aplica as migrações SQL pendentes. O backend também as aplica antes de aceitar pedidos. |
-| `npm run db:import-legacy` | Importação inicial de SQLite e JSON para uma base vazia. Requer Node 22.13+ com `node:sqlite`. |
 | `npm run sync:run -- --dry-run --snapshot <ficheiro>` | Gera um plano com o catálogo SQL e uma cópia local da loja. |
 | `npm run shopify:snapshot` | Cópia do estado atual da loja para JSON |
 

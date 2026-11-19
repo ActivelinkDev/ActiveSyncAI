@@ -36,7 +36,7 @@ Cada app tem o seu `node_modules` (não há workspace npm).
 apps/backend/src/
   index.ts                 monta routers, middleware de acesso, migrações SQL Server, agendamento
   db/mssql.ts              pool Kysely + Tedious partilhado
-  db/mssql-migrations.ts   esquema SQL Server aplicado no arranque
+  db/mssql-migrations.ts   esquema SQL Server aplicado no arranque (um só fornecedor, nomes de colunas genéricos)
   utils/data-dir.ts        DATA_ROOT / dataPath() — todos os caminhos de dados passam por aqui
   utils/logger.ts          logLine() → SSE /api/logs/stream (aparece no painel da interface)
   services/scheduler.ts    sync diário (importação + sync Shopify), lock partilhado

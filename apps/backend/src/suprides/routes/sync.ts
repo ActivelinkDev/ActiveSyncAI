@@ -463,7 +463,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
     const syncedSkus = new Set<string>();
     if (resumeSince) {
       const rows = await getMssql().selectFrom('products').select('sku')
-        .where('supplier', '=', 'suprides').where('shopify_synced_at', '>=', resumeSince).execute();
+        .where('shopify_synced_at', '>=', resumeSince).execute();
       for (const r of rows) syncedSkus.add(r.sku);
     }
     const runStartedAt = resumeSince ?? new Date().toISOString();
@@ -771,7 +771,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
         await getMssql().updateTable('products').set({
           shopify_product_id: createdIds.productId, shopify_variant_id: createdIds.variantId,
           shopify_inventory_item_id: createdIds.inventoryItemId, shopify_content_hash: contentHash(desired),
-        }).where('supplier', '=', 'suprides').where('sku', '=', p.sku).execute();
+        }).where('sku', '=', p.sku).execute();
         skuShopifyCache.set(p.sku, { productId: createdIds.productId, variantId: createdIds.variantId, inventoryItemId: createdIds.inventoryItemId });
         markDone(p, 'created');
         if (!opts.skipImages && imageUrls.length) await syncImages(p.sku, createdIds.productId, imageUrls);
@@ -798,7 +798,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
       if (w.publish) { throwIfCancelled(); await publishProduct(known.productId); }
       if (w.product && w.contentHash !== skuContentHash.get(p.sku)) {
         await getMssql().updateTable('products').set({ shopify_content_hash: w.contentHash })
-          .where('supplier', '=', 'suprides').where('sku', '=', p.sku).execute();
+          .where('sku', '=', p.sku).execute();
         skuContentHash.set(p.sku, w.contentHash);
       }
       markDone(p, 'updated');
@@ -820,7 +820,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
             await processProduct(p);
             if (!dryRun) {
               await getMssql().updateTable('products').set({ shopify_synced_at: new Date().toISOString() })
-                .where('supplier', '=', 'suprides').where('sku', '=', p.sku).execute();
+                .where('sku', '=', p.sku).execute();
             }
           } catch (e: any) {
             if (e?.cancelled || e?.code === 'ERR_CANCELED') break;
@@ -1054,7 +1054,7 @@ async function syncStock() {
   const byId = new Map(shop.map(sp => [sp.productId, sp]));
   const stored = await getMssql().selectFrom('products')
     .select(['sku', 'shopify_product_id', 'stock_status', 'stock'])
-    .where('supplier', '=', 'suprides').where('shopify_product_id', 'is not', null).execute();
+    .where('shopify_product_id', 'is not', null).execute();
   const rows = stored.map(r => ({ sku: String(r.sku), stock_status: r.stock_status, stock: r.stock, shopify_product_id: Number(r.shopify_product_id) }))
     .filter(r => byId.has(r.shopify_product_id));
 

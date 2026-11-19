@@ -34,7 +34,7 @@ router.get("/sync", (req: Request, res: Response) => {
 // GET /api/suprides/cache/stats
 router.get("/stats", async (_req: Request, res: Response) => {
   try {
-    const { total, updated } = await getMssql().selectFrom("products").where("supplier", "=", "suprides")
+    const { total, updated } = await getMssql().selectFrom("products")
       .select([sql<number>`COUNT(*)`.as("total"), sql<Date | null>`MAX(updated_at)`.as("updated")])
       .executeTakeFirstOrThrow();
     res.json({ total_in_db: total, cache_file_exists: false, cached_at: updated?.getTime() ?? null });

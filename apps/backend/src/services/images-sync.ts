@@ -23,7 +23,7 @@ import {
 /** O driver devolve bigint como texto. A API Shopify espera o ID numérico. */
 export async function loadImageRows(skus: string[] = [], linkedOnly = true) {
   let query = getMssql().selectFrom('products').select(['sku', 'images', 'images_synced', 'shopify_product_id'])
-    .where('supplier', '=', 'suprides').orderBy('id');
+    .orderBy('id');
   if (linkedOnly) query = query.where('shopify_product_id', 'is not', null);
   if (skus.length) query = query.where('sku', 'in', sql<string>`(SELECT value FROM OPENJSON(${JSON.stringify(skus)}))`);
   return (await query.execute()).map(r => ({
@@ -34,11 +34,11 @@ export async function loadImageRows(skus: string[] = [], linkedOnly = true) {
 
 export async function setImagesSynced(sku: string, synced: boolean) {
   await getMssql().updateTable('products').set({ images_synced: synced ? 1 : 0 })
-    .where('supplier', '=', 'suprides').where('sku', '=', sku).execute();
+    .where('sku', '=', sku).execute();
 }
 
 export async function resetImageFlags(skus: string[]) {
-  let query = getMssql().updateTable('products').set({ images_synced: 0 }).where('supplier', '=', 'suprides');
+  let query = getMssql().updateTable('products').set({ images_synced: 0 });
   if (skus.length) query = query.where('sku', 'in', sql<string>`(SELECT value FROM OPENJSON(${JSON.stringify(skus)}))`);
   return Number((await query.executeTakeFirstOrThrow()).numUpdatedRows);
 }

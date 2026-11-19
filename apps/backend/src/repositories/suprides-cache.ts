@@ -11,13 +11,13 @@ export interface SupridesProduct {
   family?: string | null;
   sub_family?: string | null;
   name?: string | null;
-  price?: number | null;
-  pvpr?: number | null;
+  cost?: number | null;          // preço de custo do fornecedor
+  msrp?: number | null;          // PVP recomendado pelo fornecedor
   stock?: number | null;
   stock_status?: string | null;
   images?: string | null;      // JSON array serializado
   weight?: number | null;
-  cor?: string | null;
+  color?: string | null;
   description?: string | null;
   manufacturer?: string | null;
   short_description?: string | null;
@@ -30,7 +30,7 @@ export interface SupridesProduct {
 }
 
 function products() {
-  return getMssql().selectFrom("products").where("supplier", "=", "suprides");
+  return getMssql().selectFrom("products");
 }
 
 export async function getAllProducts(limit = 5000, offset = 0): Promise<SupridesProduct[]> {
@@ -87,28 +87,28 @@ export async function upsertProductsBatch(products: SupridesProduct[]): Promise<
       CROSS APPLY OPENJSON(j.value) WITH (
         sku nvarchar(max), ean nvarchar(max), part_number nvarchar(max), brand nvarchar(max),
         product_line nvarchar(max), family nvarchar(max), sub_family nvarchar(max), name nvarchar(max),
-        price decimal(14,4), pvpr decimal(14,4), stock int, stock_status nvarchar(max),
-        images nvarchar(max), weight float, cor nvarchar(max), description nvarchar(max),
+        cost decimal(14,4), msrp decimal(14,4), stock int, stock_status nvarchar(max),
+        images nvarchar(max), weight float, color nvarchar(max), description nvarchar(max),
         manufacturer nvarchar(max), short_description nvarchar(max)
       ) AS p
     )
     MERGE products WITH (HOLDLOCK) AS target
     USING (SELECT * FROM incoming WHERE seq = 1) AS src
-      ON target.sku = src.sku AND target.supplier = 'suprides'
+      ON target.sku = src.sku
     WHEN MATCHED THEN UPDATE SET
       ean = src.ean, part_number = src.part_number, brand = src.brand,
       product_line = src.product_line, family = src.family, sub_family = src.sub_family,
-      name = src.name, price = src.price, pvpr = src.pvpr, stock = src.stock, stock_status = src.stock_status,
+      name = src.name, cost = src.cost, msrp = src.msrp, stock = src.stock, stock_status = src.stock_status,
       images_synced = CASE WHEN src.images COLLATE Latin1_General_100_BIN2 IS DISTINCT FROM target.images COLLATE Latin1_General_100_BIN2
                             THEN 0 ELSE target.images_synced END,
-      images = src.images, weight = src.weight, cor = src.cor, description = src.description,
+      images = src.images, weight = src.weight, color = src.color, description = src.description,
       manufacturer = src.manufacturer, short_description = src.short_description,
       removed_at = NULL, updated_at = SYSUTCDATETIME()
     WHEN NOT MATCHED THEN INSERT
-      (supplier, sku, ean, part_number, brand, product_line, family, sub_family, name,
-       price, pvpr, stock, stock_status, images, weight, cor, description, manufacturer, short_description)
-    VALUES ('suprides', src.sku, src.ean, src.part_number, src.brand, src.product_line, src.family, src.sub_family, src.name,
-       src.price, src.pvpr, src.stock, src.stock_status, src.images, src.weight, src.cor, src.description, src.manufacturer, src.short_description);
+      (sku, ean, part_number, brand, product_line, family, sub_family, name,
+       cost, msrp, stock, stock_status, images, weight, color, description, manufacturer, short_description)
+    VALUES (src.sku, src.ean, src.part_number, src.brand, src.product_line, src.family, src.sub_family, src.name,
+       src.cost, src.msrp, src.stock, src.stock_status, src.images, src.weight, src.color, src.description, src.manufacturer, src.short_description);
   `.execute(getMssql());
   return products.length;
 }
@@ -117,7 +117,7 @@ export async function markMissingAsRemoved(seenSkus: Set<string>): Promise<numbe
   const result = await sql`
     UPDATE p SET removed_at = SYSUTCDATETIME(), stock = 0, stock_status = 'sem_stock'
     FROM products p
-    WHERE p.supplier = 'suprides' AND p.removed_at IS NULL
+    WHERE p.removed_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM OPENJSON(${JSON.stringify([...seenSkus])}) seen WHERE seen.value = p.sku)
   `.execute(getMssql());
   return Number(result.numAffectedRows ?? 0n);
@@ -129,11 +129,11 @@ export async function countActiveProducts(): Promise<number> {
 }
 
 export async function deleteProductBySku(sku: string): Promise<boolean> {
-  const result = await getMssql().deleteFrom("products").where("supplier", "=", "suprides").where("sku", "=", sku).executeTakeFirst();
+  const result = await getMssql().deleteFrom("products").where("sku", "=", sku).executeTakeFirst();
   return result.numDeletedRows > 0n;
 }
 
 export async function clearAllProducts(): Promise<number> {
-  const result = await getMssql().deleteFrom("products").where("supplier", "=", "suprides").executeTakeFirst();
+  const result = await getMssql().deleteFrom("products").executeTakeFirst();
   return Number(result.numDeletedRows);
 }

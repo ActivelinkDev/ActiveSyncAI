@@ -11,17 +11,16 @@ router.get("/summary", async (_req, res) => {
     const [counts, lines, families, stats] = await Promise.all([
       sql<{ total: number; synced: number; withTags: number }>`
         SELECT COUNT(*) AS total, COUNT(shopify_product_id) AS synced,
-          (SELECT COUNT(DISTINCT t.sku) FROM product_tags t JOIN products p ON p.sku = t.sku
-            WHERE p.supplier = 'suprides') AS withTags
-        FROM products WHERE supplier = 'suprides'
+          (SELECT COUNT(DISTINCT t.sku) FROM product_tags t JOIN products p ON p.sku = t.sku) AS withTags
+        FROM products
       `.execute(db),
       sql<{ name: string; count: number }>`
         SELECT TOP (12) COALESCE(product_line, N'Sem linha') AS name, COUNT(*) AS count
-        FROM products WHERE supplier = 'suprides' GROUP BY product_line ORDER BY count DESC, product_line
+        FROM products GROUP BY product_line ORDER BY count DESC, product_line
       `.execute(db),
       sql<{ name: string; count: number }>`
         SELECT TOP (10) COALESCE(family, N'Sem família') AS name, COUNT(*) AS count
-        FROM products WHERE supplier = 'suprides' GROUP BY family ORDER BY count DESC, family
+        FROM products GROUP BY family ORDER BY count DESC, family
       `.execute(db),
       loadStats(),
     ]);

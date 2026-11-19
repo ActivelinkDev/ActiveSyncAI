@@ -167,7 +167,7 @@ export async function getDescendants(shopifyId: string): Promise<string[]> {
 export async function getProductsForMenuNode(shopifyId: string, directOnly: boolean): Promise<{ sku: string; name: string | null }[]> {
   const ids = directOnly ? [shopifyId] : await getDescendants(shopifyId);
   const { rows } = await sql<{ sku: string; name: string | null }>`
-    SELECT sku, name FROM products WHERE supplier = 'suprides' AND shopify_node_id IN
+    SELECT sku, name FROM products WHERE shopify_node_id IN
       (SELECT value FROM OPENJSON(${JSON.stringify(ids)})) ORDER BY name, sku`.execute(getMssql());
   return rows;
 }
@@ -176,7 +176,7 @@ export async function getProductsForMenuNode(shopifyId: string, directOnly: bool
 export async function getMenuWithProductCounts() {
   const [nodes, counts] = await Promise.all([
     getAllNodes(),
-    getMssql().selectFrom("products").where("supplier", "=", "suprides")
+    getMssql().selectFrom("products")
       .where("shopify_node_id", "is not", null).groupBy("shopify_node_id")
       .select(["shopify_node_id", sql<number>`COUNT(*)`.as("n")]).execute(),
   ]);
@@ -196,7 +196,7 @@ export async function getMenuWithProductCounts() {
 export async function rebuildProductNodeIds(): Promise<{ updated: number }> {
   const index = await getIndex();
   return getMssql().transaction().setIsolationLevel("serializable").execute(async trx => {
-    const products = await trx.selectFrom("products").where("supplier", "=", "suprides")
+    const products = await trx.selectFrom("products")
       .select(["id", "product_line", "family", "shopify_node_id"]).execute();
     let updated = 0;
     const changed: { id: number; node: string | null }[] = [];
@@ -209,7 +209,7 @@ export async function rebuildProductNodeIds(): Promise<{ updated: number }> {
       await sql`UPDATE p SET shopify_node_id = changes.node FROM products p
         JOIN OPENJSON(${JSON.stringify(changed.slice(i, i + 1000))})
           WITH (id int, node nvarchar(100)) changes ON changes.id = p.id
-        WHERE p.supplier = 'suprides'`.execute(trx);
+        `.execute(trx);
     }
     return { updated };
   });

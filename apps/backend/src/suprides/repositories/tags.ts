@@ -10,23 +10,28 @@ export interface SpTagGroup {
   created_at: Date;
 }
 
+// A API mantém nome/descricao/unidade; na base de dados as colunas são name/description/unit.
+function tagGroups() {
+  return getMssql().selectFrom("tag_groups")
+    .select(["id", "name as nome", "description as descricao", "unit as unidade", "created_at"]);
+}
+
 export function getTagGroups(): Promise<SpTagGroup[]> {
-  return getMssql().selectFrom("tag_groups").selectAll().orderBy("nome").$castTo<SpTagGroup>().execute();
+  return tagGroups().orderBy("name").$castTo<SpTagGroup>().execute();
 }
 
 export async function getTagGroupById(id: number): Promise<SpTagGroup | null> {
-  return await getMssql().selectFrom("tag_groups").selectAll().where("id", "=", id)
-    .$castTo<SpTagGroup>().executeTakeFirst() ?? null;
+  return await tagGroups().where("id", "=", id).$castTo<SpTagGroup>().executeTakeFirst() ?? null;
 }
 
 export async function createTagGroup(nome: string, descricao?: string, unidade?: string): Promise<number> {
-  const row = await getMssql().insertInto("tag_groups").values({ nome, descricao: descricao ?? null, unidade: unidade ?? null })
+  const row = await getMssql().insertInto("tag_groups").values({ name: nome, description: descricao ?? null, unit: unidade ?? null })
     .output("inserted.id as id").executeTakeFirstOrThrow();
   return Number(row.id);
 }
 
 export async function updateTagGroup(id: number, nome: string, descricao?: string, unidade?: string): Promise<void> {
-  await getMssql().updateTable("tag_groups").set({ nome, descricao: descricao ?? null, unidade: unidade ?? null }).where("id", "=", id).execute();
+  await getMssql().updateTable("tag_groups").set({ name: nome, description: descricao ?? null, unit: unidade ?? null }).where("id", "=", id).execute();
 }
 
 export async function deleteTagGroup(id: number): Promise<void> {
@@ -74,7 +79,6 @@ export async function setMenuNodeTagGroups(shopifyId: string, tagGroupIds: numbe
 
 export async function resolveTagGroupsForNode(
   shopifyNodeId: string | null,
-  _supplier = "suprides",
   ancestorIds?: string[],
 ): Promise<number[]> {
   if (!shopifyNodeId) return [];
@@ -97,12 +101,12 @@ export interface SpProductTagValue {
 
 export function getProductTagValues(sku: string): Promise<SpProductTagValue[]> {
   return getMssql().selectFrom("product_tags as t").innerJoin("products as p", "p.sku", "t.sku")
-    .selectAll("t").where("p.supplier", "=", "suprides").where("t.sku", "=", sku).$castTo<SpProductTagValue>().execute();
+    .selectAll("t").where("t.sku", "=", sku).$castTo<SpProductTagValue>().execute();
 }
 
 export async function upsertProductTagValue(sku: string, tagGroupId: number, value: string): Promise<boolean> {
   const result = await sql`MERGE product_tags WITH (HOLDLOCK) AS target
-    USING (SELECT sku, ${tagGroupId} AS tag_group_id, ${value} AS value FROM products WHERE supplier = 'suprides' AND sku = ${sku}) AS src
+    USING (SELECT sku, ${tagGroupId} AS tag_group_id, ${value} AS value FROM products WHERE sku = ${sku}) AS src
     ON target.sku = src.sku AND target.tag_group_id = src.tag_group_id
     WHEN MATCHED THEN UPDATE SET value = src.value, updated_at = SYSUTCDATETIME()
     WHEN NOT MATCHED THEN INSERT (sku, tag_group_id, value) VALUES (src.sku, src.tag_group_id, src.value);`.execute(getMssql());
@@ -112,13 +116,12 @@ export async function upsertProductTagValue(sku: string, tagGroupId: number, val
 export async function deleteProductTagValue(sku: string, tagGroupId: number): Promise<void> {
   const db = getMssql();
   await db.deleteFrom("product_tags").where("sku", "=", sku).where("tag_group_id", "=", tagGroupId)
-    .where("sku", "in", db.selectFrom("products").select("sku").where("supplier", "=", "suprides")).execute();
+    .where("sku", "in", db.selectFrom("products").select("sku")).execute();
 }
 
-export async function clearAllProductTagValues(supplier = "suprides"): Promise<number> {
+export async function clearAllProductTagValues(): Promise<number> {
   const db = getMssql();
-  const result = await db.deleteFrom("product_tags").where("sku", "in", db.selectFrom("products").select("sku")
-    .where("supplier", "=", supplier)).executeTakeFirst();
+  const result = await db.deleteFrom("product_tags").where("sku", "in", db.selectFrom("products").select("sku")).executeTakeFirst();
   return Number(result.numDeletedRows);
 }
 
@@ -144,21 +147,20 @@ export async function saveAiProductTags(sku: string, values: { tag_group_id: num
   });
 }
 
-export async function clearPopulateDone(supplier = "suprides"): Promise<number> {
+export async function clearPopulateDone(): Promise<number> {
   const db = getMssql();
-  const result = await db.deleteFrom("ai_tagged_products").where("sku", "in", db.selectFrom("products").select("sku")
-    .where("supplier", "=", supplier)).executeTakeFirst();
+  const result = await db.deleteFrom("ai_tagged_products").where("sku", "in", db.selectFrom("products").select("sku")).executeTakeFirst();
   return Number(result.numDeletedRows);
 }
 
-export async function countProductsWithTags(supplier = "suprides"): Promise<number> {
+export async function countProductsWithTags(): Promise<number> {
   const row = await getMssql().selectFrom("product_tags as t").innerJoin("products as p", "p.sku", "t.sku")
-    .where("p.supplier", "=", supplier).select(sql<number>`COUNT(DISTINCT t.sku)`.as("n")).executeTakeFirstOrThrow();
+    .select(sql<number>`COUNT(DISTINCT t.sku)`.as("n")).executeTakeFirstOrThrow();
   return row.n;
 }
 
-export async function countProductsMapped(supplier = "suprides"): Promise<number> {
+export async function countProductsMapped(): Promise<number> {
   const row = await getMssql().selectFrom("ai_tagged_products as t").innerJoin("products as p", "p.sku", "t.sku")
-    .where("p.supplier", "=", supplier).select(sql<number>`COUNT(*)`.as("n")).executeTakeFirstOrThrow();
+    .select(sql<number>`COUNT(*)`.as("n")).executeTakeFirstOrThrow();
   return row.n;
 }

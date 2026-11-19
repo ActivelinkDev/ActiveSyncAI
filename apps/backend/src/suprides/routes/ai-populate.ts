@@ -105,7 +105,7 @@ function sanitize(s: string | null | undefined): string {
 
 async function fetchSpTagGroups(tagGroupIds: number[]): Promise<TGV[]> {
   const { rows } = await sql<{ id: number; nome: string; descricao?: string; unidade?: string; value: string | null }>`
-    SELECT g.id, g.nome, g.descricao, g.unidade, v.value
+    SELECT g.id, g.name AS nome, g.description AS descricao, g.unit AS unidade, v.value
     FROM tag_groups g LEFT JOIN tag_values v ON v.tag_group_id = g.id
     WHERE g.id IN (SELECT value FROM OPENJSON(${JSON.stringify(tagGroupIds)})) ORDER BY v.value`.execute(getMssql());
   const groups = new Map<number, TGV>();
@@ -138,11 +138,11 @@ async function runAiBulk(
     if (isClosedFn()) break;
 
     const batch = products.slice(i, i + BATCH_SIZE);
-    type ProductDetails = { sku: string; name: string | null; brand: string | null; cor: string | null;
+    type ProductDetails = { sku: string; name: string | null; brand: string | null; color: string | null;
       description: string | null; short_description: string | null; processed: string | null };
-    const { rows } = await sql<ProductDetails>`SELECT p.sku, p.name, p.brand, p.cor, p.description,
+    const { rows } = await sql<ProductDetails>`SELECT p.sku, p.name, p.brand, p.color, p.description,
       p.short_description, done.sku AS processed FROM products p LEFT JOIN ai_tagged_products done ON p.sku = done.sku
-      WHERE p.supplier = 'suprides' AND p.sku IN (SELECT value FROM OPENJSON(${JSON.stringify(batch.map(p => p.sku))}))`
+      WHERE p.sku IN (SELECT value FROM OPENJSON(${JSON.stringify(batch.map(p => p.sku))}))`
       .execute(getMssql());
     const bySku = new Map(rows.map(row => [row.sku, row]));
     const batchReady: { prod: { sku: string; name: string }; row: ProductDetails }[] = [];
@@ -169,7 +169,7 @@ async function runAiBulk(
     const userPayload = batchReady.map(({ prod, row }) => {
       const entry: Record<string, any> = { ref: prod.sku, design: sanitize(row.name) };
       if (row.brand)             entry.marca           = sanitize(row.brand);
-      if (row.cor)               entry.cor             = sanitize(row.cor);
+      if (row.color)             entry.cor             = sanitize(row.color);
       if (row.short_description) entry.descricao_curta = sanitize(row.short_description);
       if (row.description)       entry.descricao       = sanitize(row.description);
       return entry;
@@ -364,7 +364,7 @@ router.post("/ai-populate-produto", async (req: Request, res: Response) => {
 
     const userEntry: Record<string, any> = { ref, design: sanitize(row.name) };
     if (row.brand)             userEntry.marca           = sanitize(row.brand);
-    if (row.cor)               userEntry.cor             = sanitize(row.cor);
+    if (row.color)             userEntry.cor             = sanitize(row.color);
     if (row.short_description) userEntry.descricao_curta = sanitize(row.short_description);
     if (row.description)       userEntry.descricao       = sanitize(row.description);
 

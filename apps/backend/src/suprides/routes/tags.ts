@@ -202,7 +202,7 @@ router.get("/product/:sku/tag-values", async (req: Request, res: Response) => {
 
     // Enriquecer com normalized_value da tabela de normalização
     const normRows = await getMssql().selectFrom("product_tags_normalized").select(["tag_group_id", "normalized_value"])
-      .where("product_ref", "=", req.params.sku).execute();
+      .where("sku", "=", req.params.sku).execute();
     const normMap = new Map(normRows.map(r => [r.tag_group_id, r.normalized_value]));
 
     const values = saved.map(v => ({
@@ -280,7 +280,7 @@ router.get("/products/search", async (req: Request, res: Response) => {
     const like = `%${q}%`;
     const { rows } = await sql<{ ref: string; design: string }>`
       SELECT TOP(100) sku AS ref, COALESCE(name, sku) AS design FROM products
-      WHERE supplier = 'suprides' AND (sku LIKE ${like} OR name LIKE ${like}) ORDER BY name, sku`.execute(getMssql());
+      WHERE (sku LIKE ${like} OR name LIKE ${like}) ORDER BY name, sku`.execute(getMssql());
     res.json(rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -307,9 +307,9 @@ router.post("/normalize", async (_req: Request, res: Response) => {
   try {
     const totals = await getMssql().transaction().execute(async trx => {
       const { rows } = await sql<{ sku: string; tag_group_id: number; value: string; tag_nome: string }>`
-        SELECT pt.sku, pt.tag_group_id, pt.value, tg.nome AS tag_nome
+        SELECT pt.sku, pt.tag_group_id, pt.value, tg.name AS tag_nome
         FROM product_tags pt WITH (UPDLOCK, HOLDLOCK)
-        JOIN products p ON p.sku = pt.sku AND p.supplier = 'suprides'
+        JOIN products p ON p.sku = pt.sku
         JOIN tag_groups tg ON tg.id = pt.tag_group_id WHERE TRIM(pt.value) <> ''`.execute(trx);
       const values = rows.flatMap(row => {
         const value = applyRule(row.tag_nome, row.value);
@@ -319,9 +319,9 @@ router.post("/normalize", async (_req: Request, res: Response) => {
         await sql`MERGE product_tags_normalized WITH (HOLDLOCK) AS target
           USING OPENJSON(${JSON.stringify(values.slice(i, i + 1000))})
             WITH (sku nvarchar(64), tag_group_id int, value nvarchar(max)) AS src
-          ON target.product_ref = src.sku AND target.tag_group_id = src.tag_group_id
+          ON target.sku = src.sku AND target.tag_group_id = src.tag_group_id
           WHEN MATCHED THEN UPDATE SET normalized_value = src.value, updated_at = SYSUTCDATETIME()
-          WHEN NOT MATCHED THEN INSERT (product_ref, tag_group_id, normalized_value)
+          WHEN NOT MATCHED THEN INSERT (sku, tag_group_id, normalized_value)
             VALUES (src.sku, src.tag_group_id, src.value);`.execute(trx);
       }
       return { total: rows.length, saved: values.length, ignored: rows.length - values.length };

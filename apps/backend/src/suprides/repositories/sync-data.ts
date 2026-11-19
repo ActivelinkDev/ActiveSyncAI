@@ -17,18 +17,18 @@ interface ProductTag { sku: string; group_name: string; value: string }
 
 async function loadSyncTags(): Promise<ProductTag[]> {
   const result = await sql<ProductTag>`
-    IF EXISTS (SELECT 1 FROM product_tags_normalized n JOIN products p ON p.sku = n.product_ref WHERE p.supplier = 'suprides')
-      SELECT n.product_ref AS sku, g.nome AS group_name, n.normalized_value AS value
+    IF EXISTS (SELECT 1 FROM product_tags_normalized n JOIN products p ON p.sku = n.sku)
+      SELECT n.sku AS sku, g.name AS group_name, n.normalized_value AS value
       FROM product_tags_normalized n
       JOIN tag_groups g ON g.id = n.tag_group_id
-      JOIN products p ON p.sku = n.product_ref
-      WHERE p.supplier = 'suprides' AND n.normalized_value <> ''
+      JOIN products p ON p.sku = n.sku
+      WHERE n.normalized_value <> ''
     ELSE
-      SELECT t.sku, g.nome AS group_name, t.value
+      SELECT t.sku, g.name AS group_name, t.value
       FROM product_tags t
       JOIN tag_groups g ON g.id = t.tag_group_id
       JOIN products p ON p.sku = t.sku
-      WHERE p.supplier = 'suprides' AND t.value <> ''
+      WHERE t.value <> ''
   `.execute(getMssql());
   return result.rows;
 }
@@ -36,7 +36,7 @@ async function loadSyncTags(): Promise<ProductTag[]> {
 export async function loadSyncData() {
   const [settings, collMap, menu, collMargins, products, states, tags] = await Promise.all([
     loadAdminSettings(), loadShopifyCollectionMapping(), loadMenuItems(), loadCollectionMargins(), getAllProducts(),
-    getMssql().selectFrom('products').where('supplier', '=', 'suprides')
+    getMssql().selectFrom('products')
       .select(['sku', 'shopify_node_id', 'shopify_product_id', 'shopify_variant_id', 'shopify_inventory_item_id',
         'images_synced', 'shopify_content_hash']).$castTo<ProductSyncState>().execute(),
     loadSyncTags(),
@@ -60,6 +60,5 @@ export async function updateShopifyIds(updates: ShopifyIdUpdate[]) {
     JOIN OPENJSON(${JSON.stringify(updates)}) WITH (
       sku nvarchar(64), productId bigint, variantId bigint, inventoryItemId bigint
     ) i ON i.sku = p.sku
-    WHERE p.supplier = 'suprides'
   `.execute(getMssql());
 }

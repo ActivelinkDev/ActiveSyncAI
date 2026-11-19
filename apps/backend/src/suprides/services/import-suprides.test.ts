@@ -31,7 +31,7 @@ test('mapeia o produto do fornecedor, incluindo o retorno de stock', () => {
   assert.equal(mapped.sku, 'S1');
   assert.equal(mapped.stock, 20);
   assert.equal(mapped.stock_status, 'disponivel');
-  assert.equal(mapped.price, 10.25);
+  assert.equal(mapped.cost, 10.25);
   assert.equal(mapped.images, '["a","b"]');
 });
 

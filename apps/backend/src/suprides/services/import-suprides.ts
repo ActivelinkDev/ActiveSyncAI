@@ -61,15 +61,15 @@ export function mapApiProduct(p: any): SupridesProduct {
     family:            p.Family ?? p.family ? String(p.Family ?? p.family) : null,
     sub_family:        p.sub_family   ? String(p.sub_family)   : null,
     name:              p.name         ? String(p.name)         : null,
-    price:             p.price != null ? (parseFloat(normalizeMoney(String(p.price))) || null) : null,
-    pvpr:              p.pvpr  != null ? (parseFloat(normalizeMoney(String(p.pvpr)))  || null) : null,
+    cost:              p.price != null ? (parseFloat(normalizeMoney(String(p.price))) || null) : null,
+    msrp:              p.pvpr  != null ? (parseFloat(normalizeMoney(String(p.pvpr)))  || null) : null,
     stock:             parseStock(p.stock != null ? String(p.stock) : undefined),
     stock_status:      parseStockStatus(p.stock != null ? String(p.stock) : undefined),
     images:            Array.isArray(p.images) && p.images.length > 0
                          ? JSON.stringify(p.images.map(String).filter(Boolean))
                          : null,
     weight:            p.weight != null ? Number(p.weight) : null,
-    cor:               p.cor          ? String(p.cor)          : null,
+    color:             p.cor          ? String(p.cor)          : null,
     description:       cleanHtml(p.description),
     manufacturer:      p.manufacturer ? String(p.manufacturer) : null,
     short_description: cleanHtml(p.short_description),

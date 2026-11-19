@@ -16,7 +16,7 @@ export type PriceSource = 'INITIAL' | 'SNAPSHOT' | 'SYNC' | 'CAMPAIGN' | 'CAMPAI
 
 export interface CurrentPrice { price: number; compareAt: number | null }
 export interface PriceChange {
-  supplier: string; sku: string; productId: number | null; status: string | null;
+  sku: string; productId: number | null; status: string | null;
   oldPrice: number | null; newPrice: number; oldCompareAt: number | null; newCompareAt: number | null;
 }
 
@@ -25,10 +25,6 @@ const toMoney = (v: string | number | null | undefined): number | null => {
   const n = Math.round(Number(v) * 100) / 100;
   return Number.isFinite(n) ? n : null;
 };
-
-export function supplierOf(sku: string): string {
-  return /^SUP/i.test(sku) ? 'suprides' : 'outro';
-}
 
 /**
  * Compara a loja com o último preço conhecido (puro, testável).
@@ -46,7 +42,7 @@ export function diffPrices(current: Map<string, CurrentPrice>, products: Snapsho
     const cur = current.get(sku);
     if (cur && cur.price === price && cur.compareAt === compareAt) continue;
     out.push({
-      supplier: supplierOf(sku), sku, productId: p.productId ?? null, status: p.status ?? null,
+      sku, productId: p.productId ?? null, status: p.status ?? null,
       oldPrice: cur?.price ?? null, newPrice: price,
       oldCompareAt: cur?.compareAt ?? null, newCompareAt: compareAt,
     });
@@ -107,11 +103,11 @@ export async function recordShopPrices(products: SnapshotProduct[], at: Date, so
   const when = at.toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
 
   await db.transaction().execute(async trx => {
-    // SQL Server aceita até 2100 parâmetros por pedido: 150 linhas × 11 colunas.
+    // SQL Server aceita até 2100 parâmetros por pedido: 150 linhas × 10 colunas.
     for (let i = 0; i < changes.length; i += 150) {
       const chunk = changes.slice(i, i + 150);
       await trx.insertInto('price_history').values(chunk.map(c => ({
-        supplier: c.supplier, sku: c.sku, shopify_product_id: c.productId,
+        sku: c.sku, shopify_product_id: c.productId,
         old_price: c.oldPrice, new_price: c.newPrice,
         old_compare_at_price: c.oldCompareAt, new_compare_at_price: c.newCompareAt,
         status: c.status, source: current.size === 0 ? 'INITIAL' : source, changed_at: when,
@@ -121,15 +117,15 @@ export async function recordShopPrices(products: SnapshotProduct[], at: Date, so
     for (let i = 0; i < changes.length; i += 250) {
       const chunk = changes.slice(i, i + 250);
       const values = sql.join(chunk.map(c =>
-        sql`(${c.sku}, ${c.supplier}, ${c.productId}, ${c.newPrice}, ${c.newCompareAt}, ${c.status}, ${when})`));
+        sql`(${c.sku}, ${c.productId}, ${c.newPrice}, ${c.newCompareAt}, ${c.status}, ${when})`));
       await sql`
         MERGE price_current AS t
-        USING (VALUES ${values}) AS s (sku, supplier, shopify_product_id, price, compare_at_price, status, updated_at)
+        USING (VALUES ${values}) AS s (sku, shopify_product_id, price, compare_at_price, status, updated_at)
         ON t.sku = s.sku
-        WHEN MATCHED THEN UPDATE SET supplier = s.supplier, shopify_product_id = s.shopify_product_id,
+        WHEN MATCHED THEN UPDATE SET shopify_product_id = s.shopify_product_id,
           price = s.price, compare_at_price = s.compare_at_price, status = s.status, updated_at = s.updated_at
-        WHEN NOT MATCHED THEN INSERT (sku, supplier, shopify_product_id, price, compare_at_price, status, updated_at)
-          VALUES (s.sku, s.supplier, s.shopify_product_id, s.price, s.compare_at_price, s.status, s.updated_at);
+        WHEN NOT MATCHED THEN INSERT (sku, shopify_product_id, price, compare_at_price, status, updated_at)
+          VALUES (s.sku, s.shopify_product_id, s.price, s.compare_at_price, s.status, s.updated_at);
       `.execute(trx);
     }
   });

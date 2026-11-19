@@ -254,6 +254,55 @@ const migrations: Record<string, Migration> = {
       await sql`IF COL_LENGTH('collection_margins', 'position') IS NULL ALTER TABLE collection_margins ADD position int NULL`.execute(db);
     },
   },
+
+  // Um só fornecedor e nomes genéricos (19/11): sai a coluna supplier; price → cost,
+  // pvpr → msrp, cor → color; tag_groups nome/descricao/unidade → name/description/unit;
+  // product_tags_normalized.product_ref → sku.
+  '0007_single_supplier_generic_names': {
+    async up(db: Kysely<any>) {
+      // Travão: não deitar fora dados de outro fornecedor (o histórico de preços só tem 'outro' deduzido do SKU).
+      await sql`IF EXISTS (SELECT 1 FROM products WHERE supplier <> 'suprides')
+          OR EXISTS (SELECT 1 FROM line_mappings WHERE supplier <> 'suprides')
+          OR EXISTS (SELECT 1 FROM line_to_menu WHERE supplier <> 'suprides')
+          OR EXISTS (SELECT 1 FROM family_mappings WHERE supplier <> 'suprides')
+          OR EXISTS (SELECT 1 FROM collection_mapping WHERE supplier <> 'suprides')
+        THROW 51001, 'Há dados de outro fornecedor: rever antes de passar a um só fornecedor.', 1;`.execute(db);
+
+      // products: índice e valor por omissão da coluna supplier (nome gerado pelo SQL Server)
+      await sql`DROP INDEX ix_products_supplier ON products`.execute(db);
+      await sql`DECLARE @c sysname = (SELECT dc.name FROM sys.default_constraints dc
+          JOIN sys.columns col ON col.object_id = dc.parent_object_id AND col.column_id = dc.parent_column_id
+          WHERE dc.parent_object_id = OBJECT_ID('products') AND col.name = 'supplier');
+        DECLARE @drop nvarchar(400) = N'ALTER TABLE products DROP CONSTRAINT ' + QUOTENAME(@c);
+        IF @c IS NOT NULL EXEC sp_executesql @drop;`.execute(db);
+      await sql`ALTER TABLE products DROP COLUMN supplier`.execute(db);
+      await sql`EXEC sp_rename 'products.price', 'cost', 'COLUMN'`.execute(db);
+      await sql`EXEC sp_rename 'products.pvpr', 'msrp', 'COLUMN'`.execute(db);
+      await sql`EXEC sp_rename 'products.cor', 'color', 'COLUMN'`.execute(db);
+
+      // Mapeamentos: supplier fazia parte da chave primária
+      const keyed: [string, string, string][] = [
+        ['line_mappings', 'pk_line_mappings', 'product_line'],
+        ['line_to_menu', 'pk_line_to_menu', 'product_line'],
+        ['family_mappings', 'pk_family_mappings', 'product_line, family'],
+        ['collection_mapping', 'pk_collection_mapping', 'level, source_key, collection_id'],
+      ];
+      for (const [table, pk, cols] of keyed) {
+        await sql.raw(`ALTER TABLE ${table} DROP CONSTRAINT ${pk}`).execute(db);
+        await sql.raw(`ALTER TABLE ${table} DROP COLUMN supplier`).execute(db);
+        await sql.raw(`ALTER TABLE ${table} ADD CONSTRAINT ${pk} PRIMARY KEY (${cols})`).execute(db);
+      }
+      await sql`ALTER TABLE price_current DROP COLUMN supplier`.execute(db);
+      await sql`ALTER TABLE price_history DROP COLUMN supplier`.execute(db);
+
+      // Tags
+      await sql`EXEC sp_rename 'tag_groups.nome', 'name', 'COLUMN'`.execute(db);
+      await sql`EXEC sp_rename 'tag_groups.descricao', 'description', 'COLUMN'`.execute(db);
+      await sql`EXEC sp_rename 'tag_groups.unidade', 'unit', 'COLUMN'`.execute(db);
+      await sql`EXEC sp_rename 'uq_tag_groups_nome', 'uq_tag_groups_name', 'OBJECT'`.execute(db);
+      await sql`EXEC sp_rename 'product_tags_normalized.product_ref', 'sku', 'COLUMN'`.execute(db);
+    },
+  },
 };
 
 /**
