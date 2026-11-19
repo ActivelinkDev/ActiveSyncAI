@@ -12,7 +12,6 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { forkJoin } from 'rxjs';
 import {
   SupridesService,
-  type SupplierKey,
   type AdminSettings, type PriceMode, type MenuSyncNode,
   type CollectionMargins
 } from '../suprides.service';
@@ -42,16 +41,10 @@ interface MarginNode {
   styleUrls: ['./suprides-margens-dialog.scss']
 })
 export class SupridesMargensDialog implements OnInit {
-  private svcRoot = inject(SupridesService);
-  private svc = this.svcRoot.withSupplier('suprides');
+  private svc = inject(SupridesService);
   private dialogRef = inject(MatDialogRef<SupridesMargensDialog>);
 
-  supplierIndex = 0;
-  readonly suppliers: { key: SupplierKey; label: string }[] = [
-    { key: 'suprides', label: 'Suprides' },
-  ];
-  get activeSupplier(): SupplierKey { return this.suppliers[this.supplierIndex].key; }
-  get activeSupplierLabel(): string { return this.suppliers[this.supplierIndex].label; }
+  readonly activeSupplierLabel = 'Suprides';
 
   loading = true;
   saving  = false;
@@ -67,13 +60,6 @@ export class SupridesMargensDialog implements OnInit {
   ];
 
   ngOnInit(): void {
-    this.loadSupplierData();
-  }
-
-  onSupplierTabChange(index: number): void {
-    if (index === this.supplierIndex) return;
-    this.supplierIndex = index;
-    this.svc = this.svcRoot.withSupplier(this.activeSupplier);
     this.loadSupplierData();
   }
 

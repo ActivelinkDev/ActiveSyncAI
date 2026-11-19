@@ -57,15 +57,7 @@ interface ProdGrupoNode {
 })
 
 export class TagsDialog implements OnInit, OnDestroy {
-    tagsSource: 'suprides' = 'suprides';
-    supplierIndex = 0;
-    readonly supplierTabs: { key: 'suprides'; label: string }[] = [
-      { key: 'suprides', label: 'Suprides' },
-    ];
-
-    get activeSupplierLabel(): string {
-      return this.supplierTabs[this.supplierIndex].label;
-    }
+    readonly activeSupplierLabel = 'Suprides';
 
     tagGroups: TagGroup[] = [];
     tagsLoading = false;
@@ -293,14 +285,6 @@ export class TagsDialog implements OnInit, OnDestroy {
     this.dialogRef.backdropClick().subscribe(() => this.fechar());
     this.dialogRef.keydownEvents().subscribe(e => { if (e.key === 'Escape') this.fechar(); });
 
-    await this.loadActiveSource();
-  }
-
-  async onSupplierTabChange(index: number) {
-    if (index === this.supplierIndex) return;
-    this.supplierIndex = index;
-    this.tagsSource = this.supplierTabs[index].key;
-    this.supridesService.setSource(this.tagsSource);
     await this.loadActiveSource();
   }
 
@@ -579,14 +563,6 @@ export class TagsDialog implements OnInit, OnDestroy {
     finally { this.loadingFamilia = false; this.cdr.detectChanges(); }
   }
 
-  toggleFamiliaExclude(id: number) {
-    const s = new Set(this.familiaExcludedIds);
-    if (s.has(id)) s.delete(id); else s.add(id);
-    this.familiaExcludedIds = s;
-    this.familiaUnsaved = true;
-    this.cdr.detectChanges();
-  }
-
   onFamiliaSelectionChange(ids: number[]) { this.familiaTagIds = ids; this.familiaUnsaved = true; }
 
   async saveFamilia() {
@@ -702,29 +678,6 @@ export class TagsDialog implements OnInit, OnDestroy {
         .map(([id, from]) => ({ id, from, nome: this.tags.find(t => t.id === id)?.nome ?? `#${id}` }));
     } catch { /* leave empty */ }
     finally { this.loadingSubfamilia = false; this.cdr.detectChanges(); }
-  }
-
-  isSubfamiliaTagExcluded(id: number): boolean {
-    if (this.subfamiliaExcludedIds.has(id)) return true;
-    if (this.subfamiliaTagIds.includes(id)) return false;
-    return this.subfamiliaAncestorExcludedIds.has(id);
-  }
-
-  toggleSubfamiliaExclude(id: number) {
-    if (this.subfamiliaAncestorExcludedIds.has(id)) {
-      const next = new Set(this.subfamiliaTagIds);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      this.subfamiliaTagIds = Array.from(next);
-      this.subfamiliaUnsaved = true;
-      this.cdr.detectChanges();
-      return;
-    }
-    const s = new Set(this.subfamiliaExcludedIds);
-    if (s.has(id)) s.delete(id); else s.add(id);
-    this.subfamiliaExcludedIds = s;
-    this.subfamiliaUnsaved = true;
-    this.cdr.detectChanges();
   }
 
   onSubfamiliaSelectionChange(ids: number[]) { this.subfamiliaTagIds = ids; this.subfamiliaUnsaved = true; }
@@ -1330,7 +1283,7 @@ export class TagsDialog implements OnInit, OnDestroy {
   // ===== Normalização de tags =====
     normalizarTags(): void {
     if (!confirm('Normalizar todos os valores de tags dos produtos?')) return;
-    const url = `${API}/${this.tagsSource}/tags/normalize`;
+    const url = `${API}/suprides/tags/normalize`;
     this.http.post<{ total: number; saved: number; ignored: number }>(url, {}).subscribe({
       next: (r) => this.snackBar.open(`Normalização concluída — ${r.saved} valores guardados (${r.ignored} ignorados)`, 'Fechar', { duration: 4000 }),
       error: () => this.snackBar.open('Erro ao normalizar tags', 'Fechar', { duration: 3000 }),

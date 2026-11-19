@@ -411,22 +411,10 @@
                 <div class="td-inherited">
                   <span class="td-inherited-label">Herdado do grupo:</span>
                   @for (t of familiaInherited; track t.id) {
-                    @if (tagsSource !== 'suprides') {
-                      <span
-                        class="td-inherited-chip"
-                        [class.td-inherited-chip--active]="!familiaExcludedIds.has(t.id)"
-                        [class.td-inherited-chip--excluded]="familiaExcludedIds.has(t.id)"
-                        [matTooltip]="familiaExcludedIds.has(t.id) ? 'Clica para reativar esta tag herdada' : 'Clica para excluir esta tag herdada nesta família'"
-                        (click)="toggleFamiliaExclude(t.id)">
-                        {{ t.nome }}
-                        @if (familiaExcludedIds.has(t.id)) {<mat-icon class="td-excluded-icon">block</mat-icon>}
-                      </span>
-                    } @else {
-                      <span class="td-inherited-chip td-inherited-chip--active td-inherited-chip--readonly"
-                            matTooltip="Tag herdada do nível superior (só leitura)">
-                        {{ t.nome }}
-                      </span>
-                    }
+                    <span class="td-inherited-chip td-inherited-chip--active td-inherited-chip--readonly"
+                          matTooltip="Tag herdada do nível superior (só leitura)">
+                      {{ t.nome }}
+                    </span>
                   }
                 </div>
               }
@@ -525,28 +513,10 @@
                 <div class="td-inherited">
                   <span class="td-inherited-label">Herdado:</span>
                   @for (t of subfamiliaInherited; track t.id) {
-                    @if (tagsSource !== 'suprides') {
-                      <span
-                        class="td-inherited-chip"
-                        [class.td-inherited-chip--active]="!isSubfamiliaTagExcluded(t.id)"
-                        [class.td-inherited-chip--excluded]="isSubfamiliaTagExcluded(t.id)"
-                        [matTooltip]="subfamiliaAncestorExcludedIds.has(t.id)
-                          ? (subfamiliaTagIds.includes(t.id)
-                            ? 'Ativa nesta subfamília apesar de estar desativada na família. Clica para voltar a desativar.'
-                            : 'Desativada na família. Clica para ativar apenas nesta subfamília.')
-                          : (subfamiliaExcludedIds.has(t.id)
-                            ? 'Clica para reativar esta tag herdada'
-                            : 'Clica para excluir esta tag herdada nesta subfamília')"
-                        (click)="toggleSubfamiliaExclude(t.id)">
-                        {{ t.nome }}<span class="td-inherited-from">{{ t.from }}</span>
-                        @if (isSubfamiliaTagExcluded(t.id)) {<mat-icon class="td-excluded-icon">block</mat-icon>}
-                      </span>
-                    } @else {
-                      <span class="td-inherited-chip td-inherited-chip--active td-inherited-chip--readonly"
-                            matTooltip="Tag herdada do nível superior (só leitura)">
-                        {{ t.nome }}<span class="td-inherited-from">{{ t.from }}</span>
-                      </span>
-                    }
+                    <span class="td-inherited-chip td-inherited-chip--active td-inherited-chip--readonly"
+                          matTooltip="Tag herdada do nível superior (só leitura)">
+                      {{ t.nome }}<span class="td-inherited-from">{{ t.from }}</span>
+                    </span>
                   }
                 </div>
               }

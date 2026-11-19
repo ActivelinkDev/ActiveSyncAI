@@ -3,7 +3,6 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
 const API_ROOT = '' + '/api';
-export type SupplierKey = 'suprides';
 
 export interface FamiliaTree {
   product_line: string;
@@ -102,19 +101,9 @@ export interface SyncFamiliasAudit {
 
 @Injectable({ providedIn: 'root' })
 export class SupridesService {
-  private supplier: SupplierKey = 'suprides';
+  private readonly api = `${API_ROOT}/suprides`;
 
   constructor(private http: HttpClient) {}
-
-  withSupplier(supplier: SupplierKey): SupridesService {
-    const clone = new SupridesService(this.http);
-    clone.supplier = supplier;
-    return clone;
-  }
-
-  private get api(): string {
-    return `${API_ROOT}/${this.supplier}`;
-  }
 
   getFamilias(force = false): Observable<FamiliaTree[]> {
     return this.http.get<FamiliaTree[]>(`${this.api}/familias${force ? '?force=true' : ''}`);

@@ -3,8 +3,6 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom, Observable, Subscriber } from 'rxjs';
 import type { TagGroup, TagValue, Familia, Subfamilia, Produto, ProdutoTagValue } from './tags.service';
 
-type SupplierKey = 'suprides';
-
 interface MenuTreeNode {
   shopifyId: string;
   title: string;
@@ -20,19 +18,9 @@ const GERAL = '(Geral)';
 
 @Injectable({ providedIn: 'root' })
 export class SupridesTagsService {
-  private supplier: SupplierKey = 'suprides';
+  private readonly base = '/api/suprides/tags';
 
   constructor(private http: HttpClient) {}
-
-  withSupplier(supplier: SupplierKey): SupridesTagsService {
-    const clone = new SupridesTagsService(this.http);
-    clone.supplier = supplier;
-    return clone;
-  }
-
-  private get base(): string {
-    return `/api/${this.supplier}/tags`;
-  }
 
   // ── Tag Groups (interface idêntica ao TagsService) ──────────────────────────
 
@@ -425,10 +413,4 @@ export class SupridesTagsService {
   getDiscardedPairs(): Promise<any[]> { return Promise.resolve([]); }
   restoreDiscardedPair(_w: string): Promise<void> { return Promise.resolve(); }
 
-  setSource(s: string): void {
-    if (s === 'suprides') {
-      this.supplier = s;
-      this.invalidateMenuCache();
-    }
-  }
 }
