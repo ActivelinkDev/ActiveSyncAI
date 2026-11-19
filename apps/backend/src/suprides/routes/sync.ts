@@ -10,12 +10,14 @@ import {
 } from '../api/shopify-api';
 import { sendProductImages } from '../../services/images-sync';
 import { planProductWrite, contentHash, type DesiredProduct } from '../services/shopify-diff';
-import { normalizeMoney, applyMargin, applyRoundingNotBelow, slug } from '../services/price-calc';
+import { normalizeMoney, slug } from '../services/price-calc';
+import { computeBasePrice, ivaMultiplierOf, marginRuleLabel, type PriceContext } from '../services/price-engine';
 import { loadSupridesTaxonomy, normTaxonomyValue } from '../services/taxonomy';
 import {
   loadMenuItems, loadPublicMenu, loadShopifyCollectionMapping, loadStats, saveStats
 } from '../repositories/store';
 import { getMssql } from '../../db/mssql';
+import { migrateMssql } from '../../db/mssql-migrations';
 import { loadAppState, saveAppState } from '../../db/app-state';
 import { loadSyncData, updateShopifyIds, type ShopifyIdUpdate } from '../repositories/sync-data';
 import { buildPublicMenuTree, publishPublicMenu } from '../services/public-menu';
@@ -24,11 +26,10 @@ import {
   buildActiveCollectionIndexes as _buildIndexes,
   buildDerivedCollectionIds,
   collectionHierarchyLookup as _hierarchyLookup,
-  collectionLevel,
   uniqueIds,
   CollectionHierarchy,
 } from './sync-helpers';
-import type { CollectionMargins, CollectionMarginRule, MenuNode, SupridesProduct } from '../types';
+import type { MenuNode, SupridesProduct } from '../types';
 import fs from 'fs';
 import path from 'path';
 import { readAllProducts, buildSkuIndex, type SnapshotProduct } from '../api/shopify-read';
@@ -65,19 +66,6 @@ let syncProgress: {
   running: false, total: 0, done: 0, errors: 0
 };
 let syncCancelled = false;
-
-function findCollectionMargin(
-  collIds: string[],
-  margins: CollectionMargins,
-  hierarchyById: Map<string, CollectionHierarchy>
-): CollectionMarginRule | null {
-  const sorted = [...collIds].sort((a, b) => collectionLevel(b, hierarchyById) - collectionLevel(a, hierarchyById));
-  for (const id of sorted) {
-    const r = margins.rules[id];
-    if (r && r.marginValue > 0) return r;
-  }
-  return null;
-}
 
 router.get('/progress', (_req, res) => {
   res.json(syncProgress);
@@ -415,6 +403,9 @@ export function runFullShopifySync(opts: SyncOptions = {}, onStart?: () => void)
   // Histórico de preços (regra dos 30 dias) depois de qualquer sync real, também cancelado ou
   // com erro a meio: pode já ter havido preços enviados. Ainda dentro do lock, antes de outro sync.
   return withCatalogueLock(async () => {
+    // O sync grava colunas recentes (ex.: products.base_price): garantir o esquema, também
+    // quando corre fora do backend (npm run sync:run).
+    await migrateMssql();
     try {
       return await runSync(opts, onStart);
     } finally {
@@ -619,7 +610,11 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
       return resolvedCollIdCache.get(cid)!;
     };
 
-    const ivaMultiplier = 1 + ((settings.ivaRate ?? 23) / 100);
+    const ivaMultiplier = ivaMultiplierOf(settings.ivaRate);
+    const priceCtx: PriceContext = { margins: collMargins, hierarchyById, ivaRate: settings.ivaRate ?? 23, rounding: settings.rounding };
+    // Preço base de cada SKU processado (gravado em products.base_price no sync real).
+    // null = o sync não gere o preço (sem custo; fora do mapeamento e sem stock).
+    const basePrices = new Map<string, { price: number; rule: string | null } | null>();
 
     const throwIfCancelled = () => {
       if (syncCancelled) throw Object.assign(new Error('SYNC_CANCELLED'), { cancelled: true });
@@ -655,6 +650,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
       };
 
       if (draftOnlySkus.has(p.sku)) {
+        basePrices.set(p.sku, null);
         const known = skuShopifyCache.get(p.sku)!;
         const changes = await sendDraftOnly(known.productId, formatStockStatusLabel('sem_stock'));
         if (!changes.length) unchanged++;
@@ -671,6 +667,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
         ? (parseFloat(normalizeMoney(String(p.price))) || 0)
         : 0;
       if (cost <= 0) {
+        basePrices.set(p.sku, null);
         const known = skuShopifyCache.get(p.sku);
         const changes = known ? await sendDraftOnly(known.productId) : [];
         if (dryRun) {
@@ -685,11 +682,9 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
       // Fora do mapeamento: coleções atuais da loja (só para a margem; não se acrescentam).
       const shopCurrent = shopCollectionSkus.has(p.sku) ? shopBySku.get(p.sku) : undefined;
       const collectionIds = productCollections(p, line, fam, sub, shopCurrent);
-      const rule = findCollectionMargin(collectionIds, collMargins, hierarchyById);
-      let basePrice = cost;
-      if (rule) basePrice = applyMargin(basePrice, rule.mode, rule.marginValue);
-      // Nunca abaixo de custo + IVA (venda com prejuízo): o arredondamento sobe se for preciso.
-      const finalPrice = applyRoundingNotBelow(basePrice * ivaMultiplier, cost * ivaMultiplier, settings.rounding);
+      // Motor de preço: margem da coleção mais profunda → IVA → arredondamento, nunca abaixo de custo + IVA.
+      const { rule, price: finalPrice } = computeBasePrice(cost, collectionIds, priceCtx);
+      basePrices.set(p.sku, { price: finalPrice, rule: marginRuleLabel(rule) });
 
       const price = finalPrice.toFixed(2);
       // Sem preço riscado fora de campanha (regra dos 30 dias / Omnibus, decisão 19/11): o PVPR do
@@ -717,7 +712,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
         if (dryRun) {
           plan.push({
             sku: p.sku, action: 'skip-new', status, price, compareAtPrice, cost: costPrice, stockStatus,
-            marginRule: rule ? `${rule.mode}:${rule.marginValue}` : null, collectionIds,
+            marginRule: marginRuleLabel(rule), collectionIds,
           });
         }
         return;
@@ -765,7 +760,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
         if (dryRun) {
           plan.push({
             sku: p.sku, action: 'create', status, price, compareAtPrice, cost: costPrice, stockStatus,
-            marginRule: rule ? `${rule.mode}:${rule.marginValue}` : null, collectionIds,
+            marginRule: marginRuleLabel(rule), collectionIds,
           });
           return;
         }
@@ -796,7 +791,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
         plan.push({
           sku: p.sku, action: 'update', shopifyProductId: known.productId,
           status, price, compareAtPrice, cost: costPrice, stockStatus,
-          marginRule: rule ? `${rule.mode}:${rule.marginValue}` : null,
+          marginRule: marginRuleLabel(rule),
           collectionIds, changes: w.changes,
         });
         return;
@@ -829,8 +824,16 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
           try {
             await processProduct(p);
             if (!dryRun) {
-              await getMssql().updateTable('products').set({ shopify_synced_at: new Date().toISOString() })
-                .where('sku', '=', p.sku).execute();
+              const base = basePrices.get(p.sku);
+              const now = new Date().toISOString();
+              await getMssql().updateTable('products').set({
+                shopify_synced_at: now,
+                ...(base !== undefined ? {
+                  base_price: base ? base.price.toFixed(2) : null,
+                  base_margin_rule: base?.rule ?? null,
+                  base_price_at: now,
+                } : {}),
+              }).where('sku', '=', p.sku).execute();
             }
           } catch (e: any) {
             if (e?.cancelled || e?.code === 'ERR_CANCELED') break;

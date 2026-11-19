@@ -303,6 +303,18 @@ const migrations: Record<string, Migration> = {
       await sql`EXEC sp_rename 'product_tags_normalized.product_ref', 'sku', 'COLUMN'`.execute(db);
     },
   },
+
+  // Preço base (fora de campanha) calculado pelo motor de preço e gravado em cada sync real:
+  // é o preço que a loja tem sem promoção e o ponto de partida das campanhas (19/11).
+  // NULL = o sync não gere o preço deste produto (sem custo, fora do mapeamento sem stock).
+  '0008_products_base_price': {
+    async up(db: Kysely<any>) {
+      await sql`ALTER TABLE products ADD
+        base_price decimal(12,2) NULL,
+        base_margin_rule nvarchar(40) NULL,
+        base_price_at datetime2(3) NULL`.execute(db);
+    },
+  },
 };
 
 /**
