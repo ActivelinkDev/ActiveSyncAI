@@ -40,3 +40,23 @@ test('planBrandWrites: novas, alteradas, sem mudanças e as que deixaram de ter 
   assert.deepEqual(planBrandWrites([{ handle: 'lovit', name: 'Lovit', products: 2 }], shop.slice(3)),
     [{ handle: 'lovit', name: 'Lovit', products: 2, visible: true, isNew: false }]);
 });
+
+test('planLogoLinks: nome do ficheiro = marca (qualquer grafia), não substitui sem --force', async () => {
+  const { planLogoLinks } = await import('./brands-sync');
+  const brands: ShopBrand[] = [
+    { handle: 'apple', name: 'Apple', products: 209, visible: true, logo: null },
+    { handle: 'daan-tech', name: 'Daan Tech', products: 3, visible: true, logo: null },
+    { handle: 'xiaomi', name: 'Xiaomi', products: 54, visible: true, logo: 'gid://shopify/MediaImage/1' },
+  ];
+  const f = (file: string) => ({ file, name: file.replace(/\.[^.]+$/, ''), ext: file.slice(file.lastIndexOf('.')) });
+  const files = [f('Apple.png'), f('apple.svg'), f('Daan Tech.PNG'), f('xiaomi.svg'), f('Samsung.png'), f('leia-me.txt')];
+  assert.deepEqual(planLogoLinks(files, brands), [
+    { kind: 'link', handle: 'apple', brand: 'Apple', file: 'Apple.png', replace: false },
+    { kind: 'duplicate', handle: 'apple', file: 'apple.svg' },
+    { kind: 'link', handle: 'daan-tech', brand: 'Daan Tech', file: 'Daan Tech.PNG', replace: false },
+    { kind: 'no-brand', file: 'Samsung.png' },
+    { kind: 'skip-has-logo', handle: 'xiaomi', brand: 'Xiaomi', file: 'xiaomi.svg' },
+  ]);
+  const forced = planLogoLinks([f('xiaomi.svg')], brands, true);
+  assert.deepEqual(forced, [{ kind: 'link', handle: 'xiaomi', brand: 'Xiaomi', file: 'xiaomi.svg', replace: true }]);
+});

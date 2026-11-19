@@ -20,7 +20,7 @@ export const BRAND_TYPE = 'marca';
 const NOT_BRANDS = new Set(['suprides', '']);
 
 export interface ActiveBrand { handle: string; name: string; products: number }
-export interface ShopBrand { handle: string; name: string | null; products: number | null; visible: boolean | null }
+export interface ShopBrand { handle: string; name: string | null; products: number | null; visible: boolean | null; logo?: string | null; hidden?: boolean }
 export interface BrandWrite { handle: string; name: string; products: number; visible: boolean; isNew: boolean }
 
 /** Marcas com produtos à venda (estado ACTIVE), a partir da leitura da loja. Puro. */
@@ -109,6 +109,8 @@ async function readShopBrands(http: Client): Promise<ShopBrand[]> {
         handle: n.handle, name: f.get('nome') ?? null,
         products: f.get('produtos') != null ? Number(f.get('produtos')) : null,
         visible: f.get('visivel') == null ? null : f.get('visivel') === 'true',
+        logo: f.get('logo') || null,
+        hidden: f.get('oculta') === 'true',
       });
     }
     after = d?.metaobjects?.pageInfo?.hasNextPage ? d.metaobjects.pageInfo.endCursor : null;
@@ -130,7 +132,11 @@ async function upsertBrand(http: Client, w: BrandWrite): Promise<void> {
   userErrors(`metaobjectUpsert(${w.handle})`, r?.metaobjectUpsert);
 }
 
-export interface BrandsSyncResult { active: ActiveBrand[]; writes: BrandWrite[]; definitionCreated: boolean; applied: boolean }
+export interface BrandsSyncResult {
+  active: ActiveBrand[]; writes: BrandWrite[]; definitionCreated: boolean; applied: boolean;
+  /** Marcas visíveis na homepage ainda sem logótipo. */
+  withoutLogo: string[];
+}
 
 /** Atualiza as marcas na loja. `apply=false` só calcula (lê a loja, não escreve). */
 export async function syncBrands(products: SnapshotProduct[], apply = true): Promise<BrandsSyncResult> {
@@ -143,7 +149,9 @@ export async function syncBrands(products: SnapshotProduct[], apply = true): Pro
   });
   const writes = planBrandWrites(active, existing);
   if (apply) for (const w of writes) await upsertBrand(http, w);
-  return { active, writes, definitionCreated, applied: apply };
+  const logos = new Map(existing.map(e => [e.handle, e]));
+  const withoutLogo = active.filter(a => !logos.get(a.handle)?.logo && !logos.get(a.handle)?.hidden).map(a => a.name);
+  return { active, writes, definitionCreated, applied: apply, withoutLogo };
 }
 
 /** Versão para o fim do sync: nunca lança (as marcas não podem estragar o resultado do sync). */
@@ -156,10 +164,93 @@ export async function syncBrandsAfterSync(products: SnapshotProduct[] | null): P
       logLine(`[Marcas] ${r.active.length} marca(s) à venda; atualizadas ${r.writes.length}: ` +
         r.writes.slice(0, 10).map(w => `${w.name}${w.visible ? ` (${w.products})` : ' (escondida)'}`).join(', '));
     }
+    if (r.withoutLogo.length) {
+      logLine(`[Marcas] ${r.withoutLogo.length} marca(s) na homepage sem logótipo: ${r.withoutLogo.slice(0, 15).join(', ')} ` +
+        '(npm run brands:logos -- <pasta> --apply)');
+    }
   } catch (e: any) {
     const msg = String(e?.message ?? e);
     logLine(/access denied|scope|ACCESS_DENIED/i.test(msg)
       ? '[Marcas] Não atualizadas: a app da Shopify não tem permissão para metaobjects (write_metaobjects, write_metaobject_definitions)'
       : `[Marcas] Não atualizadas: ${msg}`);
   }
+}
+
+// ── Logótipos (npm run brands:logos) ─────────────────────────────────────────
+
+export const LOGO_MIME: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
+  '.gif': 'image/gif', '.svg': 'image/svg+xml',
+};
+
+export interface LogoFile { file: string; name: string; ext: string }
+export type LogoAction =
+  | { kind: 'link'; handle: string; brand: string; file: string; replace: boolean }
+  | { kind: 'skip-has-logo'; handle: string; brand: string; file: string }
+  | { kind: 'no-brand'; file: string }
+  | { kind: 'duplicate'; handle: string; file: string };
+
+/** Que ficheiro vai para que marca (pelo nome do ficheiro, como o handle da marca). Puro. */
+export function planLogoLinks(files: LogoFile[], brands: ShopBrand[], force = false): LogoAction[] {
+  const byHandle = new Map(brands.map(b => [b.handle, b]));
+  const used = new Set<string>();
+  const out: LogoAction[] = [];
+  for (const f of [...files].sort((a, b) => a.file.localeCompare(b.file))) {
+    if (!LOGO_MIME[f.ext.toLowerCase()]) continue;
+    const handle = slug(f.name);
+    const b = byHandle.get(handle);
+    if (!b) { out.push({ kind: 'no-brand', file: f.file }); continue; }
+    if (used.has(handle)) { out.push({ kind: 'duplicate', handle, file: f.file }); continue; }
+    used.add(handle);
+    const brand = b.name ?? handle;
+    if (b.logo && !force) out.push({ kind: 'skip-has-logo', handle, brand, file: f.file });
+    else out.push({ kind: 'link', handle, brand, file: f.file, replace: !!b.logo });
+  }
+  return out;
+}
+
+/** Lê as marcas da loja (com logótipo). */
+export async function readBrandsForLogos(): Promise<ShopBrand[]> {
+  return readShopBrands(await makeGraphqlClient());
+}
+
+/** Carrega uma imagem para Conteúdo → Ficheiros e devolve o ID do ficheiro. */
+async function uploadImage(http: Client, filename: string, mimeType: string, data: Buffer, alt: string): Promise<string> {
+  const st = await gql(http, `mutation($i: [StagedUploadInput!]!) {
+      stagedUploadsCreate(input: $i) { stagedTargets { url resourceUrl parameters { name value } } userErrors { field message } } }`, {
+    i: [{ resource: 'IMAGE', filename, mimeType, httpMethod: 'POST', fileSize: String(data.length) }],
+  });
+  userErrors('stagedUploadsCreate', st?.stagedUploadsCreate);
+  const target = st.stagedUploadsCreate.stagedTargets[0];
+  const form = new FormData();
+  for (const p of target.parameters) form.append(p.name, p.value);
+  form.append('file', new Blob([new Uint8Array(data)], { type: mimeType }), filename);
+  const up = await fetch(target.url, { method: 'POST', body: form });
+  if (!up.ok) throw new Error(`Envio do ficheiro falhou (HTTP ${up.status})`);
+  const fc = await gql(http, `mutation($f: [FileCreateInput!]!) {
+      fileCreate(files: $f) { files { id } userErrors { field message } } }`, {
+    f: [{ originalSource: target.resourceUrl, contentType: 'IMAGE', alt }],
+  });
+  userErrors('fileCreate', fc?.fileCreate);
+  return fc.fileCreate.files[0].id as string;
+}
+
+/** Liga um ficheiro ao campo "logo" de uma marca que já existe (não mexe nos outros campos). */
+async function setBrandLogo(http: Client, handle: string, fileId: string): Promise<void> {
+  const d = await gql(http, `query($h: MetaobjectHandleInput!) { metaobjectByHandle(handle: $h) { id } }`,
+    { h: { type: BRAND_TYPE, handle } });
+  const id = d?.metaobjectByHandle?.id;
+  if (!id) throw new Error(`Marca ${handle} não existe na Shopify`);
+  const r = await gql(http, `mutation($id: ID!, $m: MetaobjectUpdateInput!) {
+      metaobjectUpdate(id: $id, metaobject: $m) { metaobject { id } userErrors { field message code } } }`,
+    { id, m: { fields: [{ key: 'logo', value: fileId }] } });
+  userErrors(`metaobjectUpdate(${handle})`, r?.metaobjectUpdate);
+}
+
+/** Carrega o ficheiro e liga-o à marca. */
+export async function uploadBrandLogo(handle: string, brand: string, filename: string, data: Buffer, ext: string): Promise<string> {
+  const http = await makeGraphqlClient();
+  const fileId = await uploadImage(http, `marca-${handle}${ext.toLowerCase()}`, LOGO_MIME[ext.toLowerCase()], data, `Logótipo ${brand}`);
+  await setBrandLogo(http, handle, fileId);
+  return fileId;
 }
