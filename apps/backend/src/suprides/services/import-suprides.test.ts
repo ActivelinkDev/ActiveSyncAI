@@ -2,6 +2,7 @@ import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import products = require('../../repositories/suprides-cache');
 import store = require('../repositories/store');
+import campaigns = require('../repositories/campaigns');
 import { runSupridesImport, mapApiProduct, type ImportEvent } from './import-suprides';
 
 const range = (n: number) => Array.from({ length: n }, (_, i) => `S${i + 1}`);
@@ -23,6 +24,7 @@ function mockRepository(t: TestContext, active: number) {
   });
   t.mock.method(products, 'countProducts', async () => Math.max(active, saved.length));
   t.mock.method(store, 'loadPublicMenu', async () => ({ nodes: [] }));
+  t.mock.method(campaigns, 'withdrawLossMakers', async () => []);
   return { saved, removalRequests };
 }
 

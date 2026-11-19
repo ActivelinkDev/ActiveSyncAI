@@ -10,6 +10,7 @@ import dashboardRoutes from "./routes/dashboard";
 import systemStatsRouter, { systemInfoRouter } from "./routes/system-stats";
 import supridesRouter from "./suprides/index";
 import { migrateMssql } from "./db/mssql-migrations";
+import { startCampaignTicker } from "./services/campaign-ticker";
 import { closeMssql } from "./db/mssql";
 import { schedulerRouter, startScheduler } from "./services/scheduler";
 import { DATA_ROOT } from "./utils/data-dir";
@@ -106,6 +107,7 @@ async function start() {
     console.log(`Acesso     : ${subnetSource === "config" ? `${subnets.length} sub-rede(s) configurada(s) + este PC` : "redes internas (10.x, 172.16-31.x, 192.168.x) + este PC"}`);
     console.log(`Alertas    : ${alertsConfigured() ? "email ativo" : "email não configurado (só no log)"}`);
     startScheduler();
+    startCampaignTicker();
   });
 }
 

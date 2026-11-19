@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import type { LivePromotion } from '../repositories/campaigns';
 import assert from 'node:assert/strict';
 import { MENU, MAPPING } from '../../test-support/fixtures';
 import type { SupridesProduct } from '../types';
@@ -41,9 +42,10 @@ const products = [
 ];
 
 type StoredStates = Awaited<ReturnType<typeof loadSyncData>>['states'];
-const run = (createNewProducts = false, states: StoredStates = [], shop = SHOP) => runFullShopifySync({
+const run = (createNewProducts = false, states: StoredStates = [], shop = SHOP, promotions = new Map<string, LivePromotion>()) => runFullShopifySync({
   dryRun: true,
   readShop: async () => shop,
+  readPromotions: async () => promotions,
   readLocal: async () => ({
     settings: { ivaRate: 23, rounding: { aboveUnitTo999: true, belowUnitTo499: true }, createNewProducts },
     collMap: MAPPING, menu: MENU, collMargins: { rules: { '101': { mode: 'percentage', marginValue: 20 } } },
@@ -150,4 +152,18 @@ test('sync:verify: produto ativo não publicado na loja → diferença', async (
     : p));
   const v = verifyPlan(plan.filter(i => i.sku === 'UPD'), after);
   assert.deepEqual(v.mismatches.map(m => m.field), ['published']);
+});
+
+test('dry-run: produto em promoção → preço promocional e riscado = referência dos 30 dias', async () => {
+  // UPD: base 15,49 (ver acima). Promoção fixada: 13,94 com referência 15,49.
+  const promos = new Map<string, LivePromotion>([['UPD', { campaignId: 7, promoPrice: 13.94, referencePrice: 15.49 }]]);
+  const upd = bySku((await run(false, [], SHOP, promos)).plan).get('UPD')!;
+  assert.equal(upd.price, '13.94');
+  assert.equal(upd.compareAtPrice, '15.49');
+
+  // O base desceu abaixo do promocional: cobra-se o base; sem riscado se já não houver redução face à referência.
+  const promosAlto = new Map<string, LivePromotion>([['UPD', { campaignId: 7, promoPrice: 16.0, referencePrice: 15.49 }]]);
+  const upd2 = bySku((await run(false, [], SHOP, promosAlto)).plan).get('UPD')!;
+  assert.equal(upd2.price, '15.49');
+  assert.equal(upd2.compareAtPrice, null);
 });

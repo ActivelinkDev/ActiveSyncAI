@@ -5,6 +5,7 @@ import { getProducts, parseStock, parseStockStatus } from "../api/suprides-api";
 import { normalizeMoney } from "./price-calc";
 import { rebuildProductNodeIds } from "./menu-resolver";
 import { loadPublicMenu } from "../repositories/store";
+import { withdrawLossMakers } from "../repositories/campaigns";
 import { logLine } from "../../utils/logger";
 
 export type ImportEvent =
@@ -181,6 +182,14 @@ export async function runSupridesImport(
       say({ type: "log", message: `Node IDs reconstruídos: ${updated} produtos mapeados ao menu.` });
     } else {
       say({ type: "log", message: "Menu público vazio — shopify_node_id não reconstruído (corre Sync Shopify)." });
+    }
+
+    // Campanhas ativas: retirar os produtos cuja promoção passou a dar prejuízo (o custo subiu).
+    // O sync ou o temporizador das campanhas repõem depois o preço base na loja.
+    const withdrawn = await withdrawLossMakers();
+    if (withdrawn.length) {
+      say({ type: "log", message: `Campanhas: ${withdrawn.length} produto(s) retirado(s) da promoção por prejuízo (custo subiu): ` +
+        withdrawn.slice(0, 10).map(w => `${w.sku} (campanha ${w.campaignId})`).join(", ") });
     }
 
     say({ type: "done", inserted: totalSaved, total, removed, message: `Concluído — ${totalSaved} produtos importados.` });

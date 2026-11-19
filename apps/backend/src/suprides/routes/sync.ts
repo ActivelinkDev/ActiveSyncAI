@@ -12,6 +12,8 @@ import { sendProductImages } from '../../services/images-sync';
 import { planProductWrite, contentHash, type DesiredProduct } from '../services/shopify-diff';
 import { normalizeMoney, slug } from '../services/price-calc';
 import { computeBasePrice, ivaMultiplierOf, marginRuleLabel, type PriceContext } from '../services/price-engine';
+import { promoShopPrices } from '../services/campaign-calc';
+import { loadLivePromotions, campaignAttribution, type LivePromotion } from '../repositories/campaigns';
 import { loadSupridesTaxonomy, normTaxonomyValue } from '../services/taxonomy';
 import {
   loadMenuItems, loadPublicMenu, loadShopifyCollectionMapping, loadStats, saveStats
@@ -396,6 +398,8 @@ interface SyncOptions {
   readLocal?: typeof loadSyncData;
   /** Não enviar imagens neste sync (ficam por enviar; ver /sync-images). */
   skipImages?: boolean;
+  /** Promoções em vigor (testes); por omissão lidas do SQL Server (nenhuma com readLocal). */
+  readPromotions?: () => Promise<Map<string, LivePromotion>>;
 }
 
 export function runFullShopifySync(opts: SyncOptions = {}, onStart?: () => void) {
@@ -409,7 +413,7 @@ export function runFullShopifySync(opts: SyncOptions = {}, onStart?: () => void)
     try {
       return await runSync(opts, onStart);
     } finally {
-      await recordPricesFromShop('SYNC', 'sync completo');
+      await recordPricesFromShop('SYNC', 'sync completo', undefined, () => campaignAttribution());
     }
   });
 }
@@ -429,6 +433,8 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
     const { settings, collMap, menu, collMargins, products: all, states, tags } =
       await (dryRun && opts.readLocal ? opts.readLocal : loadSyncData)();
     const createNewProducts = settings.createNewProducts === true;
+    // Promoções em vigor (campanha ATIVA, produto INCLUIDO): preço promocional + preço riscado = referência dos 30 dias.
+    const promotions = await (opts.readPromotions ?? (opts.readLocal ? async () => new Map<string, LivePromotion>() : () => loadLivePromotions()))();
     const indexes = buildActiveCollectionIndexes(collMap);
     const { lineToCollIds, familyToCollIds, subToCollIds } = indexes;
     const hierarchyById = collectionHierarchyLookup(menu);
@@ -686,10 +692,17 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
       const { rule, price: finalPrice } = computeBasePrice(cost, collectionIds, priceCtx);
       basePrices.set(p.sku, { price: finalPrice, rule: marginRuleLabel(rule) });
 
-      const price = finalPrice.toFixed(2);
       // Sem preço riscado fora de campanha (regra dos 30 dias / Omnibus, decisão 19/11): o PVPR do
       // fornecedor nunca foi um preço praticado na loja. Continua guardado em products.msrp.
-      const compareAtPrice: string | null = null;
+      // Em promoção: o menor entre o promocional fixado e o base atual; riscado = referência dos 30 dias.
+      let price = finalPrice.toFixed(2);
+      let compareAtPrice: string | null = null;
+      const promo = promotions.get(p.sku);
+      if (promo) {
+        const s = promoShopPrices(promo.promoPrice, promo.referencePrice, finalPrice);
+        price = s.price.toFixed(2);
+        compareAtPrice = s.compareAtPrice == null ? null : s.compareAtPrice.toFixed(2);
+      }
 
       const stockStatus = (p.stock_status as string) || parseStockStatus(p.stock);
       const title  = p.name || p.sku || 'Produto';
@@ -719,7 +732,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
       }
 
       if (!rule) noMarginRule++;
-      if (finalPrice < cost * ivaMultiplier - 0.005) belowCostVat.push({ sku: p.sku, price, cost: costPrice });
+      if (Number(price) < cost * ivaMultiplier - 0.005) belowCostVat.push({ sku: p.sku, price, cost: costPrice });
 
       // Acumular coleções de produtos visíveis para o menu público
       if (status === 'active') {

@@ -63,7 +63,9 @@ Rotas Angular: só `/dashboard` e `/erros`; o resto são diálogos.
 - Produto **sem custo** → rascunho; nunca publicado com preço inventado.
 - Produto **retirado pelo fornecedor** → rascunho, nunca apagado (travão a 85 % na importação).
 - Importação, sync completo e sync de stock partilham um lock (409 se já houver um a correr).
-- O agendamento está **desligado por omissão** (`AUTO_SYNC_ENABLED`); só o servidor de produção o liga.
+- O agendamento está **desligado por omissão** (`AUTO_SYNC_ENABLED`); só o servidor de produção o liga. O mesmo para o temporizador das campanhas (`CAMPAIGN_TICKER_ENABLED`).
+- **Preços (regra dos 30 dias / Omnibus):** fora de campanha não há preço riscado; o preço nunca fica abaixo de custo + IVA (`price-engine.ts`); qualquer escrita de preços na loja tem de gravar o histórico (`price-history.ts`). As campanhas nunca alteram `products.base_price`.
+- Testes de integração só na base `*_Test` (`.env.test`, fora do git); `getMssql` recusa outra base com `NODE_ENV=test`.
 
 ## Segurança (Etapa 3)
 - Todos os pedidos: filtro pelo IP real (`ALLOWED_SUBNETS`), sessão obrigatória em `/api` (exceto login), `Origin` da própria app nas escritas. Ver `src/security/`.

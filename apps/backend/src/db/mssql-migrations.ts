@@ -315,6 +315,54 @@ const migrations: Record<string, Migration> = {
         base_price_at datetime2(3) NULL`.execute(db);
     },
   },
+
+  // Campanhas (promoções com a regra dos 30 dias). Datas em UTC.
+  // Os valores de cada produto (base, referência, promocional, custo) ficam fixados no início.
+  // applied_at / reverted_at: quando o preço promocional foi enviado para a loja e quando o
+  // preço base foi reposto — o temporizador reconcilia por estas colunas (idempotente).
+  '0009_campaigns': {
+    async up(db: Kysely<any>) {
+      await sql`CREATE TABLE campaigns (
+        id int IDENTITY(1,1) CONSTRAINT pk_campaigns PRIMARY KEY,
+        name nvarchar(200) NOT NULL,
+        status nvarchar(20) NOT NULL CONSTRAINT df_campaigns_status DEFAULT 'RASCUNHO'
+          CONSTRAINT ck_campaigns_status CHECK (status IN ('RASCUNHO','AGENDADA','ATIVA','TERMINADA','CANCELADA')),
+        discount_type nvarchar(10) NOT NULL CONSTRAINT ck_campaigns_discount_type CHECK (discount_type IN ('PERCENT','AMOUNT')),
+        discount_value decimal(12,2) NOT NULL CONSTRAINT ck_campaigns_discount_value CHECK (discount_value > 0),
+        starts_at datetime2(0) NOT NULL,
+        ends_at datetime2(0) NOT NULL,
+        notes nvarchar(1000) NULL,
+        created_at datetime2(0) NOT NULL CONSTRAINT df_campaigns_created DEFAULT SYSUTCDATETIME(),
+        scheduled_at datetime2(0) NULL,
+        started_at datetime2(0) NULL,
+        ended_at datetime2(0) NULL,
+        CONSTRAINT ck_campaigns_dates CHECK (ends_at > starts_at)
+      )`.execute(db);
+      await sql`CREATE INDEX ix_campaigns_status ON campaigns (status, starts_at, ends_at)`.execute(db);
+
+      await sql`CREATE TABLE campaign_products (
+        campaign_id int NOT NULL CONSTRAINT fk_campaign_products_campaign REFERENCES campaigns(id) ON DELETE CASCADE,
+        sku nvarchar(64) NOT NULL,
+        state nvarchar(20) NOT NULL CONSTRAINT df_campaign_products_state DEFAULT 'INCLUIDO'
+          CONSTRAINT ck_campaign_products_state CHECK (state IN ('INCLUIDO','BLOQUEADO','RETIRADO')),
+        block_reason nvarchar(20) NULL,
+        warning nvarchar(20) NULL,
+        override_type nvarchar(10) NULL CONSTRAINT ck_campaign_products_override CHECK (override_type IN ('PERCENT','AMOUNT')),
+        override_value decimal(12,2) NULL,
+        base_price decimal(12,2) NULL,
+        reference_price decimal(12,2) NULL,
+        promo_price decimal(12,2) NULL,
+        cost_at_start decimal(14,4) NULL,
+        applied_at datetime2(0) NULL,
+        reverted_at datetime2(0) NULL,
+        removed_at datetime2(0) NULL,
+        removed_reason nvarchar(40) NULL,
+        CONSTRAINT pk_campaign_products PRIMARY KEY (campaign_id, sku)
+      )`.execute(db);
+      await sql`CREATE INDEX ix_campaign_products_sku ON campaign_products (sku)`.execute(db);
+      await sql`CREATE INDEX ix_price_history_campaign ON price_history (campaign_id)`.execute(db);
+    },
+  },
 };
 
 /**
