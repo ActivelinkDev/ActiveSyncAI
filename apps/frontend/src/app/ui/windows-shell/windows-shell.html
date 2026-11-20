@@ -1,118 +1,133 @@
-<!-- TITLEBAR -->
-<div class="titlebar">
-  <div class="titlebar-brand no-drag">
+<!-- BARRA LATERAL (navegação + ações) -->
+<aside class="sidebar" [class.collapsed]="collapsed">
+  <div class="sidebar-brand drag">
     <mat-icon class="brand-icon">auto_awesome</mat-icon>
-    <span class="brand-name">ActiveSync<span class="brand-ai">AI</span></span>
+    @if (!collapsed) {
+      <span class="brand-name">ActiveSync<span class="brand-ai">AI</span></span>
+    }
   </div>
 
-  <div class="menu no-drag">
-    <button mat-button (click)="openSupridesMapeamento()">Coleções</button>
-    <button mat-button (click)="openSupridesMargens()">Margens</button>
-    <button mat-button (click)="openCampaigns()">Campanhas</button>
-    <button mat-icon-button (click)="openPreferences()" matTooltip="Definições" class="btn-settings no-drag">
+  <nav class="nav">
+    <a class="nav-item" routerLink="/dashboard" routerLinkActive="active"
+       [matTooltip]="collapsed ? 'Dashboard' : ''" matTooltipPosition="right">
+      <mat-icon>space_dashboard</mat-icon>
+      @if (!collapsed) {
+        <span class="nav-text"><span class="nav-title">Dashboard</span><span class="nav-sub">Visão geral</span></span>
+      }
+    </a>
+
+    @if (!collapsed) { <div class="nav-section">Shopify</div> } @else { <div class="nav-divider"></div> }
+
+    <button class="nav-item" (click)="openSupridesMapeamento()"
+            [matTooltip]="collapsed ? 'Coleções Shopify' : ''" matTooltipPosition="right">
+      <mat-icon>cloud_upload</mat-icon>
+      @if (!collapsed) { <span class="nav-title">Coleções</span> }
+    </button>
+    <button class="nav-item" (click)="openSupridesMargens()"
+            [matTooltip]="collapsed ? 'Margens B2C' : ''" matTooltipPosition="right">
+      <mat-icon>percent</mat-icon>
+      @if (!collapsed) { <span class="nav-title">Margens B2C</span> }
+    </button>
+    <button class="nav-item" (click)="openCampaigns()"
+            [matTooltip]="collapsed ? 'Campanhas' : ''" matTooltipPosition="right">
+      <mat-icon>local_offer</mat-icon>
+      @if (!collapsed) { <span class="nav-title">Campanhas</span> }
+    </button>
+
+    @if (!collapsed) { <div class="nav-section">Catálogo</div> } @else { <div class="nav-divider"></div> }
+
+    <button class="nav-item" (click)="openFiltrosTags()"
+            [matTooltip]="collapsed ? 'Gestão de Tags' : ''" matTooltipPosition="right">
+      <mat-icon>sell</mat-icon>
+      @if (!collapsed) { <span class="nav-title">Gestão de Tags</span> }
+    </button>
+
+    <button class="sync-btn" [disabled]="syncing" (click)="syncSuprides()"
+            [matTooltip]="collapsed ? (syncing ? 'A sincronizar…' : 'Sync Suprides') : ''" matTooltipPosition="right">
+      <mat-icon [class.spin]="syncing">sync</mat-icon>
+      @if (!collapsed) {
+        <span>
+          @if (syncing && syncDone > 0) {
+            {{ syncDone }} guardados…
+          } @else if (syncing) {
+            A sincronizar…
+          } @else {
+            Sync Suprides
+          }
+        </span>
+      }
+    </button>
+  </nav>
+
+  <div class="nav nav-bottom">
+    <button class="nav-item" [class.active]="showLogs" (click)="toggleLogs()"
+            [matTooltip]="collapsed ? 'Logs' : ''" matTooltipPosition="right">
+      <mat-icon>list_alt</mat-icon>
+      @if (!collapsed) { <span class="nav-title">Logs</span> }
+    </button>
+    <button class="nav-item" (click)="openPreferences()"
+            [matTooltip]="collapsed ? 'Definições' : ''" matTooltipPosition="right">
       <mat-icon>settings</mat-icon>
+      @if (!collapsed) { <span class="nav-title">Definições</span> }
     </button>
-    <button mat-button class="user-btn no-drag" [matMenuTriggerFor]="userMenu" aria-label="Conta">
+    <button class="nav-item" (click)="toggleCollapsed()"
+            [matTooltip]="collapsed ? 'Expandir menu' : ''" matTooltipPosition="right">
+      <mat-icon>{{ collapsed ? 'keyboard_double_arrow_right' : 'keyboard_double_arrow_left' }}</mat-icon>
+      @if (!collapsed) { <span class="nav-title">Recolher menu</span> }
+    </button>
+
+    <button class="user-btn" [matMenuTriggerFor]="userMenu" aria-label="Conta"
+            [matTooltip]="collapsed ? (auth.username() || 'Conta') : ''" matTooltipPosition="right">
       <span class="user-avatar">{{ (auth.username() || '?').charAt(0).toUpperCase() }}</span>
-      <span class="user-name">{{ auth.username() }}</span>
+      @if (!collapsed) {
+        <span class="nav-text">
+          <span class="nav-title">{{ auth.username() }}</span>
+          <span class="nav-sub store"><span class="status-dot"></span>{{ shopifyStore || '—' }} · v2.0.0</span>
+        </span>
+        <mat-icon class="user-more">more_vert</mat-icon>
+      }
     </button>
-    <mat-menu #userMenu="matMenu" xPosition="before">
+    <mat-menu #userMenu="matMenu" xPosition="after" yPosition="above">
       <button mat-menu-item (click)="openChangePassword()"><mat-icon>key</mat-icon>Mudar palavra-passe</button>
       <button mat-menu-item (click)="logout()"><mat-icon>logout</mat-icon>Sair</button>
     </mat-menu>
   </div>
+</aside>
 
+<!-- ÁREA PRINCIPAL -->
+<main class="main">
   @if (isElectron) {
-  <div class="window-controls no-drag">
-    <button class="wc-btn" (click)="minimize()" mat-icon-button aria-label="Minimizar">
-      <mat-icon>remove</mat-icon>
-    </button>
-    <button class="wc-btn" (click)="toggleMaximize()" mat-icon-button aria-label="Maximizar/Restaurar">
-      <mat-icon>{{ maximized ? 'filter_none' : 'crop_square' }}</mat-icon>
-    </button>
-    <button class="wc-btn close" (click)="close()" mat-icon-button aria-label="Fechar">
-      <mat-icon>close</mat-icon>
-    </button>
-  </div>
-  }
-</div>
-
-<!-- RIBBON -->
-<div class="ribbon">
-  <div class="ribbon-left">
-    <button mat-raised-button class="ribbon-btn ribbon-btn--shopify" (click)="openSupridesMapeamento()">
-      <mat-icon>cloud_upload</mat-icon>
-      <span>COLEÇÕES SHOPIFY</span>
-    </button>
-
-    <button mat-raised-button class="ribbon-btn ribbon-btn--suprides-margins" (click)="openSupridesMargens()">
-      <mat-icon>percent</mat-icon>
-      <span>MARGENS B2C</span>
-    </button>
-
-    <button mat-raised-button class="ribbon-btn ribbon-btn--campaigns" (click)="openCampaigns()">
-      <mat-icon>local_offer</mat-icon>
-      <span>CAMPANHAS</span>
-    </button>
-
-    <button mat-raised-button class="ribbon-btn ribbon-btn--maptags" (click)="openFiltrosTags()">
-      <mat-icon>sell</mat-icon>
-      <span>GESTÃO DE TAGS</span>
-    </button>
-
-    <button mat-raised-button class="ribbon-btn ribbon-btn--sync" [disabled]="syncing" (click)="syncSuprides()">
-      <mat-icon>{{ syncing ? 'hourglass_empty' : 'sync' }}</mat-icon>
-      <span>
-        @if (syncing && syncDone > 0) {
-          {{ syncDone }} guardados…
-        } @else if (syncing) {
-          A SINCRONIZAR…
-        } @else {
-          SYNC SUPRIDES
-        }
-      </span>
-    </button>
-  </div>
-
-  <div class="ribbon-right">
-    <div class="toolbar-icons">
-      <button mat-icon-button matTooltip="Mostrar logs" (click)="toggleLogs()">
-        <mat-icon>list_alt</mat-icon>
+  <div class="window-bar drag">
+    <div class="window-controls no-drag">
+      <button class="wc-btn" (click)="minimize()" mat-icon-button aria-label="Minimizar">
+        <mat-icon>remove</mat-icon>
       </button>
-    </div>
-  </div>
-</div>
-
-<!-- CONTEUDO -->
-<div class="content">
-  <router-outlet></router-outlet>
-
-  <div class="logs-sidebar" *ngIf="showLogs">
-    <div class="logs-header">
-      <span>Logs</span>
-      <button mat-icon-button (click)="clearLogs()" matTooltip="Limpar">
-        <mat-icon>delete</mat-icon>
+      <button class="wc-btn" (click)="toggleMaximize()" mat-icon-button aria-label="Maximizar/Restaurar">
+        <mat-icon>{{ maximized ? 'filter_none' : 'crop_square' }}</mat-icon>
       </button>
-      <button mat-icon-button (click)="toggleLogs()" matTooltip="Fechar">
+      <button class="wc-btn close" (click)="close()" mat-icon-button aria-label="Fechar">
         <mat-icon>close</mat-icon>
       </button>
     </div>
-    <div class="logs-body">
-      <div *ngFor="let l of logs" class="log-line">{{ l }}</div>
+  </div>
+  }
+
+  <div class="content">
+    <router-outlet></router-outlet>
+
+    <div class="logs-sidebar" *ngIf="showLogs">
+      <div class="logs-header">
+        <span>Logs</span>
+        <button mat-icon-button (click)="clearLogs()" matTooltip="Limpar">
+          <mat-icon>delete</mat-icon>
+        </button>
+        <button mat-icon-button (click)="toggleLogs()" matTooltip="Fechar">
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+      <div class="logs-body">
+        <div *ngFor="let l of logs" class="log-line">{{ l }}</div>
+      </div>
     </div>
   </div>
-</div>
-
-<!-- STATUS BAR -->
-<div class="statusbar">
-  <div class="statusbar-left">
-    <span class="status-dot"></span>
-    <span class="status-text">Loja: {{ shopifyStore || '—' }}</span>
-    <span class="sep">-</span>
-    <span class="status-text">v2.0.0</span>
-  </div>
-  <div class="statusbar-right">
-    <mat-icon class="statusbar-spark">auto_awesome</mat-icon>
-    <span class="statusbar-brand">ActiveSync<span class="statusbar-ai">AI</span></span>
-  </div>
-</div>
+</main>

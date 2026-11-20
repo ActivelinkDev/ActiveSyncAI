@@ -1,7 +1,7 @@
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { AuthService } from '../../auth/auth.service';
 import { ChangePasswordDialog } from '../../auth/change-password-dialog';
-import { RouterOutlet } from '@angular/router';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { CommonModule } from '@angular/common';
 
 import { MaterialModule } from '../../material.module';
@@ -29,11 +29,16 @@ declare global {
 }
 
 const API = '' + '/api';
+const COLLAPSED_KEY = 'shell.sidebarCollapsed';
+
+function readCollapsed(): boolean {
+  try { return localStorage.getItem(COLLAPSED_KEY) === '1'; } catch { return false; }
+}
 
 @Component({
   selector: 'app-windows-shell',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, MaterialModule],
+  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive, MaterialModule],
   templateUrl: './windows-shell.html',
   styleUrls: ['./windows-shell.scss']
 })
@@ -42,6 +47,8 @@ export class WindowsShellComponent implements OnInit, OnDestroy {
   /** Botões de janela só dentro do Electron; no browser não fazem sentido. */
   readonly isElectron = !!(window.electronWindow || window.electronAPI);
   maximized = false;
+  /** Barra lateral recolhida (só ícones); lembrada neste browser. */
+  collapsed = readCollapsed();
   syncing = false;
   syncDone = 0;
   syncTotal = 0;
@@ -76,6 +83,11 @@ export class WindowsShellComponent implements OnInit, OnDestroy {
     this.sub?.unsubscribe();
     this.evtSource?.close();
     this._cacheEs?.close();
+  }
+
+  toggleCollapsed(): void {
+    this.collapsed = !this.collapsed;
+    try { localStorage.setItem(COLLAPSED_KEY, this.collapsed ? '1' : '0'); } catch { /* sem storage: só não fica lembrado */ }
   }
 
   toggleLogs(): void { this.showLogs = !this.showLogs; }

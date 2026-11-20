@@ -43,7 +43,7 @@ apps/backend/src/
   scripts/                 comandos npm (snapshot, restauro, sync, imagens, conta, credenciais)
   suprides/                núcleo: api/ (clientes Suprides e Shopify), routes/, services/, repositories/
 apps/frontend/src/app/
-  ui/windows-shell/        shell: barra de título, painel de logs, barra de estado
+  ui/windows-shell/        shell: barra lateral (navegação, sync, conta), painel de logs
   pages/                   funcionalidades em MatDialog (Mapeamento, Margens, Tags, Preferências…)
 apps/electron/             janela frameless que carrega o frontend
 ```
