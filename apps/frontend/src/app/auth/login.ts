@@ -21,11 +21,11 @@ import { AuthService } from './auth.service';
 
         <label for="u">Utilizador</label>
         <input id="u" name="username" class="g-input" autocomplete="username" required
-               [(ngModel)]="username" [disabled]="busy()" autofocus>
+               [(ngModel)]="username" [readonly]="busy()" autofocus>
 
         <label for="p">Palavra-passe</label>
         <input id="p" name="password" class="g-input" type="password" autocomplete="current-password" required
-               [(ngModel)]="password" [disabled]="busy()">
+               [(ngModel)]="password" [readonly]="busy()">
 
         @if (error()) { <div class="error" role="alert">{{ error() }}</div> }
 
@@ -67,7 +67,8 @@ export class LoginComponent {
     this.error.set('');
     const r = await this.auth.login(this.username.trim(), this.password);
     this.busy.set(false);
-    this.password = '';
-    if (!r.ok) this.error.set(r.message ?? 'Erro');
+    // Em caso de sucesso o formulário desaparece com a palavra-passe ainda preenchida: é isso que
+    // leva o browser a propor guardá-la (campos desativados ou limpos antes disso impedem-no).
+    if (!r.ok) { this.password = ''; this.error.set(r.message ?? 'Erro'); }
   }
 }

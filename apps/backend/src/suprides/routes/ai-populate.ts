@@ -126,22 +126,44 @@ async function runAiBulk(
   isClosedFn:  () => boolean,
   send:        (d: object) => void,
   skipMapped = false,
-): Promise<{ populated: number; failed: number }> {
+): Promise<{ populated: number; failed: number; total: number }> {
   const openai     = new OpenAI({ apiKey });
   const aiValidIds = new Set(tagGroups.map(t => t.id));
   const sysPrompt  = buildAiPopulateSystemPrompt(tagGroups, label, await loadCustomPrompt());
 
-  let populated = 0, failed = 0, globalIdx = 0;
-  send({ type: "start", total: products.length });
+  // Uma só consulta: quem já foi processado e quantas tags do nó já tem preenchidas.
+  const { rows: status } = await sql<{ sku: string; processed: number; filled: number }>`
+    SELECT s.value AS sku,
+      CASE WHEN EXISTS (SELECT 1 FROM ai_tagged_products d WHERE d.sku = s.value) THEN 1 ELSE 0 END AS processed,
+      (SELECT COUNT(*) FROM product_tags t WHERE t.sku = s.value AND LTRIM(RTRIM(t.value)) <> ''
+         AND t.tag_group_id IN (SELECT value FROM OPENJSON(${JSON.stringify([...aiValidIds])}))) AS filled
+    FROM OPENJSON(${JSON.stringify(products.map(p => p.sku))}) s`.execute(getMssql());
+  const statusBySku = new Map(status.map(s => [s.sku, s]));
+  let skippedComplete = 0, skippedProcessed = 0;
+  const pending = products.filter(prod => {
+    const s = statusBySku.get(prod.sku);
+    if (s && s.filled >= aiValidIds.size) { skippedComplete++; return false; }   // a IA não tem nada a acrescentar
+    if (skipMapped && s?.processed)        { skippedProcessed++; return false; }
+    return true;
+  });
+  if (skippedComplete || skippedProcessed) {
+    send({ type: "log", level: "info", ref: "", msg:
+      `[SKIP] ${skippedComplete} com todas as tags preenchidas` +
+      (skipMapped ? `, ${skippedProcessed} já processados` : "") +
+      ` — ${pending.length} de ${products.length} vão à IA` });
+  }
 
-  for (let i = 0; i < products.length; i += BATCH_SIZE) {
+  let populated = 0, failed = 0, globalIdx = 0;
+  send({ type: "start", total: pending.length });
+
+  for (let i = 0; i < pending.length; i += BATCH_SIZE) {
     if (isClosedFn()) break;
 
-    const batch = products.slice(i, i + BATCH_SIZE);
+    const batch = pending.slice(i, i + BATCH_SIZE);
     type ProductDetails = { sku: string; name: string | null; brand: string | null; color: string | null;
-      description: string | null; short_description: string | null; processed: string | null };
+      description: string | null; short_description: string | null };
     const { rows } = await sql<ProductDetails>`SELECT p.sku, p.name, p.brand, p.color, p.description,
-      p.short_description, done.sku AS processed FROM products p LEFT JOIN ai_tagged_products done ON p.sku = done.sku
+      p.short_description FROM products p
       WHERE p.sku IN (SELECT value FROM OPENJSON(${JSON.stringify(batch.map(p => p.sku))}))`
       .execute(getMssql());
     const bySku = new Map(rows.map(row => [row.sku, row]));
@@ -150,11 +172,7 @@ async function runAiBulk(
     for (const prod of batch) {
       globalIdx++;
       const row = bySku.get(prod.sku);
-      if (skipMapped && row?.processed) {
-        send({ type: "log", level: "info", ref: prod.sku, msg: `[SKIP] ${prod.sku} — já processado` });
-        continue;
-      }
-      send({ type: "progress", current: globalIdx, total: products.length, ref: prod.sku, design: prod.name });
+      send({ type: "progress", current: globalIdx, total: pending.length, ref: prod.sku, design: prod.name });
 
       if (!row) {
         send({ type: "log", level: "warn", ref: prod.sku, msg: `[SKIP] ${prod.sku} — não encontrado na BD` });
@@ -262,11 +280,11 @@ async function runAiBulk(
       }
     }
 
-    if (i + BATCH_SIZE < products.length && !isClosedFn())
+    if (i + BATCH_SIZE < pending.length && !isClosedFn())
       await new Promise(r => setTimeout(r, 150));
   }
 
-  return { populated, failed };
+  return { populated, failed, total: pending.length };
 }
 
 // ── Bulk SSE helper (usado pelos 3 endpoints de nível) ────────────────────────
@@ -307,8 +325,9 @@ async function handleBulkSse(
       res.end(); return;
     }
 
-    const { populated, failed } = await runAiBulk(products, tagGroups, label, apiKey, isClosedFn, send, skipMapped);
-    send({ type: "done", total: products.length, populated, failed });
+    const { populated, failed, total } = await runAiBulk(products, tagGroups, label, apiKey, isClosedFn, send, skipMapped);
+    send({ type: "done", total, populated, failed,
+      ...(total === 0 ? { reason: "Todos os produtos deste nó já estão mapeados." } : {}) });
     res.end();
   } catch (err: any) {
     send({ type: "error", message: err.message || "Erro interno do servidor" });
