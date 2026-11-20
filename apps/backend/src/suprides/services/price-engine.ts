@@ -34,13 +34,22 @@ export interface BasePrice {
 
 export const ivaMultiplierOf = (ivaRate: number | undefined) => 1 + ((ivaRate ?? 23) / 100);
 
-/** Regra de margem da coleção mais profunda que tenha margem > 0. */
+/**
+ * Regra de margem da coleção mais profunda que tenha margem > 0. As coleções-mãe entram também:
+ * um produto numa subcoleção sem regra herda a da família ou do grupo (ex.: Wearables → Smartphones).
+ */
 export function findCollectionMargin(
   collIds: string[],
   margins: CollectionMargins,
   hierarchyById: Map<string, CollectionHierarchy>,
 ): CollectionMarginRule | null {
-  const sorted = [...collIds].sort((a, b) => collectionLevel(b, hierarchyById) - collectionLevel(a, hierarchyById));
+  const withAncestors = new Set(collIds);
+  for (const id of collIds) {
+    const h = hierarchyById.get(id);
+    if (h?.l2Id) withAncestors.add(h.l2Id);
+    if (h?.l1Id) withAncestors.add(h.l1Id);
+  }
+  const sorted = [...withAncestors].sort((a, b) => collectionLevel(b, hierarchyById) - collectionLevel(a, hierarchyById));
   for (const id of sorted) {
     const r = margins.rules[id];
     if (r && r.marginValue > 0) return r;

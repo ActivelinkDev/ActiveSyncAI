@@ -20,6 +20,15 @@ test('findCollectionMargin: coleção mais profunda com margem > 0', () => {
   assert.equal(findCollectionMargin(['999'], { rules }, hierarchy), null);
 });
 
+test('findCollectionMargin: só a subcoleção, sem regra → herda da mãe ou do grupo', () => {
+  const p = 'percentage' as const;
+  assert.equal(findCollectionMargin(['100'], { rules: { '10': { mode: p, marginValue: 10 } } }, hierarchy)?.marginValue, 10);
+  assert.equal(findCollectionMargin(['100'], { rules: { '1': { mode: p, marginValue: 5 } } }, hierarchy)?.marginValue, 5);
+  assert.equal(findCollectionMargin(['10'], { rules: { '1': { mode: p, marginValue: 5 } } }, hierarchy)?.marginValue, 5);
+  // a regra da própria subcoleção continua a ganhar
+  assert.equal(findCollectionMargin(['100'], { rules: { '1': { mode: p, marginValue: 5 }, '100': { mode: p, marginValue: 30 } } }, hierarchy)?.marginValue, 30);
+});
+
 test('computeBasePrice: margem percentual sobre o preço de venda + IVA + arredondamento', () => {
   const b = computeBasePrice(10, ['10'], ctx({ '10': { mode: 'percentage', marginValue: 20 } }));
   // 10 / 0,8 × 1,23 = 15,375 → 15,49 (igual ao teste do dry-run)
