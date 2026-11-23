@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Gera o certificado HTTPS interno do ActiveSyncAI.
 
@@ -10,12 +10,13 @@
      (válido 2 anos), e grava-o em <DataDir>\tls\server.pfx com uma palavra-passe aleatória.
   3. Acrescenta TLS_PFX e TLS_PFX_PASSPHRASE ao .env (a palavra-passe não é mostrada).
   4. Exporta a parte pública da CA (ca.cer) para instalar nos PCs que acedem
+     (o install.ps1 dá depois à conta do serviço leitura do server.pfx)
      ("Autoridades de Certificação de Raiz Fidedignas"), uma vez por PC ou por GPO.
 
   Nada disto vai para o git: fica em <DataDir>\tls e no .env.
 
 .EXAMPLE
-  .\create-cert.ps1 -BackendDir C:\ActiveSyncAI\backend -DataDir C:\ActiveSyncAI\data -DnsNames activesync,activesync.empresa.local -IpAddresses 192.0.2.20
+  .\create-cert.ps1 -BackendDir C:\ActiveSyncAI\app\apps\backend -DataDir C:\ActiveSyncAI\data -DnsNames activesync,activesync.empresa.local -IpAddresses 192.0.2.20
 .EXAMPLE
   # Só para testar neste PC
   .\create-cert.ps1 -BackendDir . -DataDir .\data -DnsNames localhost -IpAddresses 127.0.0.1
@@ -85,7 +86,8 @@ Add-Content -Path $envFile -Encoding utf8 -Value @(
 )
 
 # Restringir a pasta tls ao utilizador atual, ao SYSTEM e aos administradores.
-icacls $tlsDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
+# SIDs em vez de nomes: os nomes dos grupos mudam com a língua do Windows (Administradores/Administrators).
+icacls $tlsDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
 
 Write-Host ''
 Write-Host "Certificado do servidor: $serverPfx (válido até $($server.NotAfter.ToString('yyyy-MM-dd')))"

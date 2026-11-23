@@ -1,0 +1,35 @@
+<!--
+  Modelo do serviço Windows (WinSW 2.x). O install.ps1 copia-o para <InstallDir>\service,
+  troca os marcadores {{...}} e instala o serviço. Não editar a cópia instalada à mão:
+  voltar a correr o install.ps1.
+
+  A conta do serviço NÃO fica aqui (nem a palavra-passe): o install.ps1 define-a
+  diretamente no Windows, depois de instalar.
+-->
+<service>
+  <id>ActiveSyncAI</id>
+  <name>ActiveSyncAI</name>
+  <description>ActiveSyncAI: importação Suprides, sync Shopify e interface web (HTTPS).</description>
+
+  <executable>{{NODE_EXE}}</executable>
+  <arguments>dist\index.js</arguments>
+  <workingdirectory>{{BACKEND_DIR}}</workingdirectory>
+  <env name="NODE_ENV" value="production" />
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart />
+  {{DEPENDS}}
+
+  <!-- Falha: reiniciar ao fim de 10 s, 30 s e 2 min; o contador limpa ao fim de 1 h. -->
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="restart" delay="2 min" />
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+
+  <logpath>{{LOG_DIR}}</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>10</keepFiles>
+  </log>
+</service>
