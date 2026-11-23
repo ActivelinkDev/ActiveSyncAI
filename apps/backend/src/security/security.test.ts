@@ -117,3 +117,33 @@ test('credenciais cifradas: ida e volta e deteção de adulteração', async () 
   assert.deepEqual(decryptFields(obj), { shopifyStore: 'loja', shopifyToken: 'tok' });
   if (prev === undefined) delete process.env.SECRETS_KEY; else process.env.SECRETS_KEY = prev;
 });
+
+test('camadas de acesso: /API e /Api não contornam sessão nem Origin', async () => {
+  const { default: express } = await import('express');
+  const { requireSession, requireSameOrigin, isApiPath, dangerousAction } = await import('./middleware');
+  assert.equal(isApiPath('/api'), true);
+  assert.equal(isApiPath('/API/suprides/x'), true);
+  assert.equal(isApiPath('/apix/y'), false);
+  assert.ok(dangerousAction({ method: 'POST', path: '/API/suprides/sync-familias' } as any));
+
+  const app = express();
+  app.set('case sensitive routing', true); // igual ao index.ts
+  app.use(requireSameOrigin());
+  app.use(requireSession());
+  const r = express.Router();
+  r.all('/segredo', (_q, s) => { s.json({ leak: true }); });
+  app.use('/api/suprides', r);
+  app.use((_q, s) => { s.status(404).end(); });
+  const srv = app.listen(0, '127.0.0.1');
+  await new Promise(res => srv.once('listening', res));
+  const base = `http://127.0.0.1:${(srv.address() as any).port}`;
+  try {
+    for (const p of ['/api/suprides/segredo', '/API/suprides/segredo', '/Api/Suprides/segredo']) {
+      const g = await fetch(base + p);
+      assert.notEqual(g.status, 200, `GET ${p} não pode devolver dados sem sessão`);
+      const po = await fetch(base + p, { method: 'POST' });
+      assert.notEqual(po.status, 200, `POST ${p} não pode passar sem sessão/origem`);
+    }
+    assert.equal((await fetch(base + '/api/suprides/segredo')).status, 401);
+  } finally { srv.close(); }
+});

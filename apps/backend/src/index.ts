@@ -50,6 +50,7 @@ configureSecurity({ secureCookies: !!tls });
 const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", false); // o IP do cliente é sempre o do socket
+app.set("case sensitive routing", true); // /API/... não pode contornar as camadas de /api/...
 
 // 1. Rede: só IPs das sub-redes permitidas (ou o próprio PC).
 app.use(ipFilter(subnets, (ip, req) => audit("access.denied.ip", { ip, detail: `${req.method} ${req.path}` })));
