@@ -15,6 +15,7 @@ npm run dev                # ts-node-dev com hot reload
 npm run build && npm start # compilar e arrancar dist/
 npx tsc --noEmit           # verificação de tipos
 npm run shopify:snapshot   # estado atual da loja → JSON
+npm run sync:run -- --dry-run  # simulação do sync (plano em data/plans/); sem --dry-run escreve na loja
 npm run auth:set-password  # criar/repor a conta (no servidor, consola interativa)
 npm run secrets:init       # gera SECRETS_KEY no .env e cifra credenciais na tabela connection_settings
 npm test                   # testes (node:test)
@@ -23,7 +24,6 @@ npm run alert:test         # email de teste dos alertas (SMTP_* e ALERT_* no .en
 # Frontend (apps/frontend) — porta 4200 (proxy /api → 127.0.0.1:3004)
 npm start
 npm run build -- --configuration production
-
 ```
 
 Cada app tem o seu `node_modules` (não há workspace npm).
