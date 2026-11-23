@@ -24,8 +24,6 @@ npm run alert:test         # email de teste dos alertas (SMTP_* e ALERT_* no .en
 npm start
 npm run build -- --configuration production
 
-# Electron (apps/electron) — opcional
-npm run dev
 ```
 
 Cada app tem o seu `node_modules` (não há workspace npm).
@@ -45,7 +43,6 @@ apps/backend/src/
 apps/frontend/src/app/
   ui/windows-shell/        shell: barra lateral (navegação, sync, conta), painel de logs
   pages/                   funcionalidades em MatDialog (Mapeamento, Margens, Tags, Preferências…)
-apps/electron/             janela frameless que carrega o frontend
 ```
 
 Rotas Angular: só `/dashboard` e `/erros`; o resto são diálogos.

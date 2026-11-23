@@ -96,22 +96,6 @@
 
 <!-- ÁREA PRINCIPAL -->
 <main class="main">
-  @if (isElectron) {
-  <div class="window-bar drag">
-    <div class="window-controls no-drag">
-      <button class="wc-btn" (click)="minimize()" mat-icon-button aria-label="Minimizar">
-        <mat-icon>remove</mat-icon>
-      </button>
-      <button class="wc-btn" (click)="toggleMaximize()" mat-icon-button aria-label="Maximizar/Restaurar">
-        <mat-icon>{{ maximized ? 'filter_none' : 'crop_square' }}</mat-icon>
-      </button>
-      <button class="wc-btn close" (click)="close()" mat-icon-button aria-label="Fechar">
-        <mat-icon>close</mat-icon>
-      </button>
-    </div>
-  </div>
-  }
-
   <div class="content">
     <router-outlet></router-outlet>
 

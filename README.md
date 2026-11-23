@@ -8,7 +8,6 @@ Middleware que importa o catálogo de fornecedores (Suprides) para uma base de d
 |---|---|
 | `apps/backend` | Node.js + Express 5 + TypeScript, SQL Server 2022 (Kysely e Tedious) |
 | `apps/frontend` | Angular 20 (componentes standalone) + Angular Material |
-| `apps/electron` | Electron 30 (janela desktop opcional) |
 
 Integrações: Shopify Admin API, API Suprides, OpenAI.
 
@@ -19,7 +18,6 @@ Requisitos: Node.js LTS e npm. Cada app tem o seu `package.json`:
 ```bash
 cd apps/backend  && npm install
 cd ../frontend   && npm install
-cd ../electron   && npm install   # só se for usar a janela desktop
 ```
 
 Copiar `apps/backend/.env.example` para `apps/backend/.env` e preencher.
@@ -40,12 +38,6 @@ Copiar `apps/backend/.env.example` para `apps/backend/.env` e preencher.
 |---|---|
 | `npm start` | `ng serve` (porta 4200) |
 | `npm run build` | Build de produção |
-
-### Electron (`apps/electron`)
-| Comando | Ação |
-|---|---|
-| `npm run dev` | Janela a apontar para `localhost:4200` |
-| `npm run build` | Instalador Windows (NSIS) |
 
 ## Variáveis de ambiente (`apps/backend/.env`)
 

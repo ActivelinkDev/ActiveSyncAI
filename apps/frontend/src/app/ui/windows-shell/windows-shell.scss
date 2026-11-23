@@ -236,30 +236,6 @@
   gap: 6px;
 }
 
-/* Só no Electron: zona para arrastar a janela + botões de janela */
-.window-bar {
-  height: 34px;
-  flex-shrink: 0;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-}
-
-.window-controls {
-  display: flex;
-  align-items: center;
-
-  .wc-btn {
-    width: 44px;
-    height: 34px;
-    border-radius: 9px;
-    color: var(--muted);
-    mat-icon { font-size: 17px; }
-    &:hover { background: var(--hover); color: var(--ink); }
-  }
-  .close:hover { background: var(--bad) !important; color: #fff; }
-}
-
 .content {
   flex: 1;
   position: relative;

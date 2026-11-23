@@ -13,21 +13,6 @@ import { SupridesMargensDialog } from '../../pages/suprides/margens/suprides-mar
 import { CampaignsDialog } from '../../pages/campaigns/campaigns-dialog';
 import { interval, Subscription } from 'rxjs';
 
-declare global {
-  interface Window {
-    electronWindow?: {
-      minimize: () => void;
-      toggleMaximize: () => Promise<boolean>;
-      close: () => void;
-    };
-    electronAPI?: {
-      minimize: () => void;
-      toggleMaximize: () => Promise<boolean>;
-      close: () => void;
-    };
-  }
-}
-
 const API = '' + '/api';
 const COLLAPSED_KEY = 'shell.sidebarCollapsed';
 
@@ -44,9 +29,6 @@ function readCollapsed(): boolean {
 })
 export class WindowsShellComponent implements OnInit, OnDestroy {
   readonly auth = inject(AuthService);
-  /** Botões de janela só dentro do Electron; no browser não fazem sentido. */
-  readonly isElectron = !!(window.electronWindow || window.electronAPI);
-  maximized = false;
   /** Barra lateral recolhida (só ícones); lembrada neste browser. */
   collapsed = readCollapsed();
   syncing = false;
@@ -170,12 +152,4 @@ export class WindowsShellComponent implements OnInit, OnDestroy {
     this.auth.logout();
   }
 
-  minimize(): void { window.electronWindow?.minimize?.(); }
-
-  async toggleMaximize(): Promise<void> {
-    if (!window.electronWindow?.toggleMaximize) return;
-    this.maximized = await window.electronWindow.toggleMaximize();
-  }
-
-  close(): void { window.electronWindow?.close?.(); }
 }

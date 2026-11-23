@@ -24,6 +24,7 @@ import {
 import { withConnectionSettings } from "./suprides/repositories/store";
 import authRouter from "./security/auth-routes";
 import { loadAccount } from "./security/password";
+import { secretsKeyConfigured } from "./security/secret-box";
 import { installCrashAlerts, alertsConfigured } from "./services/alerts";
 
 installCrashAlerts();
@@ -104,6 +105,7 @@ server.requestTimeout = 0; // SSE de longa duração
 async function start() {
   await migrateMssql();
   if (!await loadAccount()) console.warn("[segurança] Conta não configurada — correr: npm run auth:set-password");
+  if (!secretsKeyConfigured()) console.warn("[segurança] SECRETS_KEY não definida: as credenciais ficam em claro na base de dados. No servidor, correr: npm run secrets:init");
   server.listen(PORT, HOST, () => {
     console.log(`Backend ON : ${tls ? "https" : "http"}://${HOST}:${PORT}`);
     console.log(`Dados em   : ${DATA_ROOT}`);

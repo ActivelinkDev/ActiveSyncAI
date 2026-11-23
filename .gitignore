@@ -3,7 +3,6 @@ node_modules/
 
 # Builds / saídas compiladas
 dist/
-apps/electron/frontend/
 out/
 *.tsbuildinfo
 
