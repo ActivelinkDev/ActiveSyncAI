@@ -10,6 +10,8 @@ import {
   resetSyncAbort, abortSync, toMetafieldKey,
 } from '../api/shopify-api';
 import { sendProductImages } from '../../services/images-sync';
+import { syncPurchaseInventory } from '../api/shopify-purchase-inventory';
+import { blocksPurchase, needsPurchaseInventorySync } from '../services/purchase-inventory';
 import { planProductWrite, contentHash, type DesiredProduct } from '../services/shopify-diff';
 import { normalizeMoney, slug } from '../services/price-calc';
 import { computeBasePrice, ivaMultiplierOf, marginRuleLabel, type PriceContext } from '../services/price-engine';
@@ -801,6 +803,9 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
 
       const cur = shopById.get(known.productId)!;
       const w = planProductWrite(desired, cur, skuContentHash.get(p.sku) ?? null);
+      const blocked = blocksPurchase(desired.stockStatusLabel);
+      const syncInventory = needsPurchaseInventorySync(cur, blocked);
+      if (syncInventory) w.changes.push('disponibilidade_compra');
       if (!w.changes.length) unchanged++;
 
       if (dryRun) {
@@ -815,6 +820,7 @@ async function runSync(opts: SyncOptions, onStart?: () => void) {
 
       throwIfCancelled();
       if (w.product) await productUpdate(known.productId, w.product);
+      if (syncInventory) { throwIfCancelled(); await syncPurchaseInventory(known.productId, blocked); }
       if (w.variant) { throwIfCancelled(); await variantUpdate(known.productId, known.variantId, w.variant); }
       if (w.publish) { throwIfCancelled(); await publishProduct(known.productId); }
       if (w.product && w.contentHash !== skuContentHash.get(p.sku)) {
@@ -1104,10 +1110,12 @@ async function syncStock() {
     if ((cur.stockStatus ?? '') !== label) {
       input.metafields = [{ namespace: 'custom', key: 'stock_status', value: label, type: 'single_line_text_field' }];
     }
-    if (!Object.keys(input).length) return;
-    await productUpdate(r.shopify_product_id, input);
-    if (status === 'ACTIVE' && !cur.publishedAt) await publishProduct(r.shopify_product_id);
-    updated++;
+    const productChanged = Object.keys(input).length > 0;
+    if (productChanged) await productUpdate(r.shopify_product_id, input);
+    const blocked = blocksPurchase(label);
+    const inventoryChanged = needsPurchaseInventorySync(cur, blocked) && await syncPurchaseInventory(r.shopify_product_id, blocked);
+    if (productChanged && status === 'ACTIVE' && !cur.publishedAt) await publishProduct(r.shopify_product_id);
+    if (productChanged || inventoryChanged) updated++;
   };
 
   const CONCURRENCY = 5;
@@ -1132,7 +1140,7 @@ async function syncStock() {
 // Sync rápido — só estado de stock. Não toca em títulos, imagens, preços nem coleções.
 // Lê a loja e, para cada produto já na Shopify, envia só o que mudou:
 //   - status do produto (ACTIVE / DRAFT) consoante o stock_status (publica se reativar);
-//   - metafield custom.stock_status.
+//   - metafield custom.stock_status e disponibilidade de compra das variantes.
 // Lê o stock_status que a importação (API → SQL Server) gravou.
 router.post('/sync-stock', async (_req, res) => {
   if (fullSyncRunning) {

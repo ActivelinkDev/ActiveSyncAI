@@ -18,6 +18,7 @@
     "alert:test": "ts-node --transpile-only src/scripts/alert-test.ts",
     "db:check": "ts-node --transpile-only src/scripts/db-check.ts",
     "brands:logos": "ts-node --transpile-only src/scripts/brands-logos.ts",
+    "purchase-inventory:sync": "ts-node --transpile-only src/scripts/purchase-inventory-sync.ts",
     "brands:sync": "ts-node --transpile-only src/scripts/brands-sync.ts",
     "db:migrate": "ts-node --transpile-only src/scripts/db-migrate.ts",
     "prices:seed": "ts-node --transpile-only src/scripts/prices-seed.ts"

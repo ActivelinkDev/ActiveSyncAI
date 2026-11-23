@@ -4,6 +4,7 @@
  */
 import axios, { AxiosInstance } from 'axios';
 import { loadConnectionSettings } from '../repositories/store';
+import { purchaseInventoryFields, readPurchaseInventory, type PurchaseInventoryState } from '../services/purchase-inventory';
 
 /** Versão única da Admin API (leituras e escritas). */
 export const SHOPIFY_API_VERSION = '2026-10';
@@ -22,9 +23,10 @@ query($after: String, $q: String) {
       variantsCount { count }
       variants(first: 1) { nodes {
         legacyResourceId sku price compareAtPrice
+        ${purchaseInventoryFields}
         barcodes(first: 1) { nodes { value } }
         inventoryItem {
-          legacyResourceId
+          legacyResourceId tracked
           unitCost { amount }
           measurement { weight { unit value } }
         }
@@ -38,6 +40,7 @@ export interface SnapshotProduct {
   productId: number; title: string; handle: string; status: string; vendor: string;
   productType: string; updatedAt: string; publishedAt?: string | null; descriptionHtml: string | null; stockStatus: string | null;
   variantsCount: number;
+  purchaseInventory?: PurchaseInventoryState;
   variantId: number | null; sku: string | null; price: string | null; compareAtPrice: string | null;
   barcode: string | null; inventoryItemId: number | null; cost: string | null;
   weight: { unit: string; value: number } | null;
@@ -117,6 +120,7 @@ export async function readAllProducts(onProgress?: (n: number) => void, search?:
         descriptionHtml: n.descriptionHtml ?? null,
         stockStatus: n.metafield?.value ?? null,
         variantsCount: n.variantsCount?.count ?? n.variants.nodes.length,
+        purchaseInventory: v ? readPurchaseInventory(v) : undefined,
         variantId: v ? Number(v.legacyResourceId) : null, sku: v?.sku ?? null,
         price: v?.price ?? null, compareAtPrice: v?.compareAtPrice ?? null, barcode: v?.barcodes?.nodes?.[0]?.value ?? null,
         inventoryItemId: v?.inventoryItem ? Number(v.inventoryItem.legacyResourceId) : null,

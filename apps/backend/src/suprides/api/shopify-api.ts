@@ -1,4 +1,5 @@
 import { loadConnectionSettings } from '../repositories/store';
+import { blocksPurchase, newPurchaseInventory } from '../services/purchase-inventory';
 import { gql, makeGraphqlClient, SHOPIFY_API_VERSION } from './shopify-read';
 
 export { SHOPIFY_API_VERSION };
@@ -113,7 +114,9 @@ export interface CreateProductInput {
 
 /** Cria um produto de uma variante com productSet. Devolve os IDs numéricos. */
 export async function createProduct(p: CreateProductInput): Promise<{ productId: number; variantId: number; inventoryItemId: number }> {
-  const inventoryItem: Record<string, unknown> = { sku: p.sku, tracked: false };
+  const stockLabel = p.metafields?.find(field => field.namespace === 'custom' && field.key === 'stock_status')?.value;
+  const purchaseInventory = newPurchaseInventory(blocksPurchase(stockLabel));
+  const inventoryItem: Record<string, unknown> = { sku: p.sku, tracked: purchaseInventory?.inventoryItem.tracked ?? false };
   if (p.cost) inventoryItem.cost = p.cost;
   if (p.weightGrams !== undefined) inventoryItem.measurement = { weight: { value: p.weightGrams, unit: 'GRAMS' } };
   const data = await graphql(
@@ -133,6 +136,7 @@ export async function createProduct(p: CreateProductInput): Promise<{ productId:
         optionValues: [{ optionName: 'Title', name: 'Default Title' }],
         price: p.price, compareAtPrice: p.compareAtPrice ?? null,
         barcodes: p.barcode ? [{ value: p.barcode }] : [],
+        ...purchaseInventory,
         inventoryItem,
       }],
     } },
