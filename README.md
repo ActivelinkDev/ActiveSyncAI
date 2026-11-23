@@ -71,10 +71,11 @@ Sem HTTPS configurado, o backend só escuta em `127.0.0.1` (desenvolvimento).
 | `npm run sync:verify -- <plano> <cópia>` | Compara um plano com o estado real da loja |
 | `npm run images:run` / `npm run images:dedupe` | Enviar imagens em falta / apagar duplicadas |
 | `npm run brands:sync` / `npm run brands:logos -- <pasta>` | Marcas da homepage / logótipos (`--apply` para escrever) |
+| `npm run purchase-inventory:sync [-- --apply]` | Bloquear a compra de produtos "Brevemente" / "Sob encomenda" fora do sync |
 | `npm run prices:seed` | Preencher o histórico inicial de preços |
 | `npm run alert:test` | Email de teste dos alertas |
 
-Os comandos que escrevem na loja (`sync:run` sem `--dry-run`, `shopify:restore --apply`, `images:*`, `brands:* --apply`) só correm com confirmação de quem opera.
+Os comandos que escrevem na loja (`sync:run` sem `--dry-run`, `shopify:restore --apply`, `images:*`, `brands:* --apply`, `purchase-inventory:sync --apply`) só correm com confirmação de quem opera.
 
 ### Frontend (`apps/frontend`)
 | Comando | Ação |
