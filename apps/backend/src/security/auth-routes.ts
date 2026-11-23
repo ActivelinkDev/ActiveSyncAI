@@ -7,7 +7,7 @@ import { audit, readAudit } from './audit';
 import { clientIp } from './ip-filter';
 import { loginBlockedFor, registerFailure, registerSuccess } from './login-throttle';
 import {
-  loadAccount, saveAccount, verifyPassword, hashPassword, passwordProblem, dummyPasswordHash,
+  loadAccount, changePassword, type Account, verifyPassword, hashPassword, passwordProblem, dummyPasswordHash,
 } from './password';
 import {
   createSession, getSession, destroySession, destroyAllSessions, SESSION_IDLE_MS,
@@ -25,8 +25,7 @@ function tooMany(res: Response, ms: number) {
 }
 
 /** Verifica utilizador + palavra-passe sempre com o mesmo custo, exista ou não a conta. */
-async function checkCredentials(username: unknown, password: unknown): Promise<string | null> {
-  const account = loadAccount();
+async function checkCredentials(account: Account | null, username: unknown, password: unknown): Promise<string | null> {
   const u = typeof username === 'string' ? username.trim() : '';
   const p = typeof password === 'string' ? password : '';
   const hash = account?.passwordHash ?? await dummyPasswordHash();
@@ -38,19 +37,20 @@ async function checkCredentials(username: unknown, password: unknown): Promise<s
 
 router.post('/login', async (req: Request, res: Response) => {
   const ip = clientIp(req);
-  if (!loadAccount()) {
+  const account = await loadAccount();
+  if (!account) {
     res.status(503).json({ error: 'no_account', message: 'Conta ainda não configurada no servidor.' });
     return;
   }
   const blocked = loginBlockedFor(ip);
-  if (blocked > 0) { audit('login.locked', { ip }); tooMany(res, blocked); return; }
+  if (blocked > 0) { await audit('login.locked', { ip }); tooMany(res, blocked); return; }
 
-  const user = await checkCredentials(req.body?.username, req.body?.password);
+  const user = await checkCredentials(account, req.body?.username, req.body?.password);
   if (!user) {
     const { lockedMs } = registerFailure(ip);
-    audit('login.fail', { ip, detail: `utilizador="${String(req.body?.username ?? '').slice(0, 40)}"` });
+    await audit('login.fail', { ip, detail: `utilizador="${String(req.body?.username ?? '').slice(0, 40)}"` });
     await failDelay();
-    if (lockedMs > 0) { audit('login.locked', { ip, detail: `${Math.round(lockedMs / 1000)} s` }); tooMany(res, lockedMs); return; }
+    if (lockedMs > 0) { await audit('login.locked', { ip, detail: `${Math.round(lockedMs / 1000)} s` }); tooMany(res, lockedMs); return; }
     res.status(401).json({ error: 'invalid_credentials' });
     return;
   }
@@ -58,21 +58,21 @@ router.post('/login', async (req: Request, res: Response) => {
   destroySession(sessionToken(req)); // nunca reaproveitar uma sessão anterior
   const token = createSession(user, ip, String(req.headers['user-agent'] || ''));
   res.cookie(sessionCookieName(), token, sessionCookieOptions());
-  audit('login.ok', { ip, user });
+  await audit('login.ok', { ip, user });
   res.json({ username: user, idleTimeoutMs: SESSION_IDLE_MS });
 });
 
-router.post('/logout', (req, res) => {
+router.post('/logout', async (req, res) => {
   const s = getSession(sessionToken(req));
   destroySession(sessionToken(req));
   res.clearCookie(sessionCookieName(), sessionCookieOptions());
-  if (s) audit('logout', { ip: clientIp(req), user: s.username });
+  if (s) await audit('logout', { ip: clientIp(req), user: s.username });
   res.json({ ok: true });
 });
 
-router.get('/me', (req, res) => {
+router.get('/me', async (req, res) => {
   const s = getSession(sessionToken(req));
-  if (!s) { res.status(401).json({ error: 'not_authenticated', accountConfigured: !!loadAccount() }); return; }
+  if (!s) { res.status(401).json({ error: 'not_authenticated', accountConfigured: Boolean(await loadAccount()) }); return; }
   res.json({ username: s.username, idleTimeoutMs: SESSION_IDLE_MS });
 });
 
@@ -81,10 +81,11 @@ router.post('/password', async (req, res) => {
   const s = req.session!;
   const blocked = loginBlockedFor(ip);
   if (blocked > 0) { tooMany(res, blocked); return; }
-  const ok = await checkCredentials(s.username, req.body?.currentPassword);
-  if (!ok) {
+  const account = await loadAccount();
+  const ok = await checkCredentials(account, s.username, req.body?.currentPassword);
+  if (!account || !ok) {
     registerFailure(ip);
-    audit('password.fail', { ip, user: s.username });
+    await audit('password.fail', { ip, user: s.username });
     await failDelay();
     res.status(401).json({ error: 'invalid_credentials' });
     return;
@@ -93,16 +94,18 @@ router.post('/password', async (req, res) => {
   const problem = passwordProblem(next, s.username);
   if (problem) { res.status(400).json({ error: 'weak_password', message: problem }); return; }
   if (next === req.body?.currentPassword) { res.status(400).json({ error: 'weak_password', message: 'A nova palavra-passe tem de ser diferente.' }); return; }
-  const account = loadAccount()!;
-  saveAccount({ ...account, passwordHash: await hashPassword(next), changedAt: new Date().toISOString() });
+  if (!await changePassword(account, await hashPassword(next))) {
+    res.status(409).json({ error: 'account_changed' });
+    return;
+  }
   destroyAllSessions(sessionToken(req));
-  audit('password.changed', { ip, user: s.username });
+  await audit('password.changed', { ip, user: s.username });
   res.json({ ok: true });
 });
 
-router.get('/audit', (req, res) => {
+router.get('/audit', async (req, res) => {
   const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
-  res.json(readAudit(limit));
+  res.json(await readAudit(limit));
 });
 
 export default router;

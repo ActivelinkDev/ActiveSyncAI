@@ -9,7 +9,10 @@ import logsRouter from "./routes/logs";
 import dashboardRoutes from "./routes/dashboard";
 import systemStatsRouter, { systemInfoRouter } from "./routes/system-stats";
 import supridesRouter from "./suprides/index";
-import { ensureSupridesTable, ensureSupridesTagTables } from "./db/migrate-suprides";
+import campaignsRouter from "./routes/campaigns";
+import { migrateMssql } from "./db/mssql-migrations";
+import { startCampaignTicker } from "./services/campaign-ticker";
+import { closeMssql } from "./db/mssql";
 import { schedulerRouter, startScheduler } from "./services/scheduler";
 import { DATA_ROOT } from "./utils/data-dir";
 import { effectiveSubnets, ipFilter, isLoopback } from "./security/ip-filter";
@@ -18,8 +21,10 @@ import {
   configureSecurity, securityHeaders, requireSession, requireSameOrigin,
   auditDangerousActions, errorHandler,
 } from "./security/middleware";
+import { withConnectionSettings } from "./suprides/repositories/store";
 import authRouter from "./security/auth-routes";
 import { loadAccount } from "./security/password";
+import { secretsKeyConfigured } from "./security/secret-box";
 import { installCrashAlerts, alertsConfigured } from "./services/alerts";
 
 installCrashAlerts();
@@ -46,6 +51,7 @@ configureSecurity({ secureCookies: !!tls });
 const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", false); // o IP do cliente é sempre o do socket
+app.set("case sensitive routing", true); // /API/... não pode contornar as camadas de /api/...
 
 // 1. Rede: só IPs das sub-redes permitidas (ou o próprio PC).
 app.use(ipFilter(subnets, (ip, req) => audit("access.denied.ip", { ip, detail: `${req.method} ${req.path}` })));
@@ -63,6 +69,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use(requireSameOrigin());
 app.use(requireSession());
 app.use(auditDangerousActions());
+app.use("/api", (_req, _res, next) => withConnectionSettings(next));
 
 app.use("/api/auth",         authRouter);
 app.use("/api/logs",         logsRouter);
@@ -71,6 +78,7 @@ app.use("/api/system/stats", systemStatsRouter);
 app.use("/api/system/info",  systemInfoRouter);
 app.use("/api/suprides",     supridesRouter);
 app.use("/api/scheduler",    schedulerRouter);
+app.use("/api/campanhas",    campaignsRouter);
 app.use("/api", (_req, res) => { res.status(404).json({ error: "not_found" }); });
 
 // 5. Interface (Angular) servida pelo próprio backend.
@@ -94,23 +102,24 @@ const server = tls
 server.headersTimeout = 30_000;
 server.requestTimeout = 0; // SSE de longa duração
 
-server.listen(PORT, HOST, () => {
-  console.log(`Backend ON : ${tls ? "https" : "http"}://${HOST}:${PORT}`);
-  console.log(`Dados em   : ${DATA_ROOT}`);
-  console.log(`Acesso     : ${subnetSource === "config" ? `${subnets.length} sub-rede(s) configurada(s) + este PC` : "redes internas (10.x, 172.16-31.x, 192.168.x) + este PC"}`);
-  console.log(`Alertas    : ${alertsConfigured() ? "email ativo" : "email não configurado (só no log)"}`);
-  if (!loadAccount()) console.warn("[segurança] Conta não configurada — correr: npm run auth:set-password");
+async function start() {
+  await migrateMssql();
+  if (!await loadAccount()) console.warn("[segurança] Conta não configurada — correr: npm run auth:set-password");
+  if (!secretsKeyConfigured()) console.warn("[segurança] SECRETS_KEY não definida: as credenciais ficam em claro na base de dados. No servidor, correr: npm run secrets:init");
+  server.listen(PORT, HOST, () => {
+    console.log(`Backend ON : ${tls ? "https" : "http"}://${HOST}:${PORT}`);
+    console.log(`Dados em   : ${DATA_ROOT}`);
+    console.log(`Acesso     : ${subnetSource === "config" ? `${subnets.length} sub-rede(s) configurada(s) + este PC` : "redes internas (10.x, 172.16-31.x, 192.168.x) + este PC"}`);
+    console.log(`Alertas    : ${alertsConfigured() ? "email ativo" : "email não configurado (só no log)"}`);
+    startScheduler();
+    startCampaignTicker();
+  });
+}
 
-  try {
-    ensureSupridesTable();
-    ensureSupridesTagTables();
-    console.log("[sqlite] supplier tables ok");
-  } catch (err) {
-    console.error("[sqlite] Failed to ensure supplier tables:", err);
-    process.exit(1);
-  }
-
-  startScheduler();
+start().catch(async err => {
+  console.error("[arranque] Falhou a inicialização do SQL Server:", err.message);
+  await closeMssql();
+  process.exitCode = 1;
 });
 
 process.on("SIGINT", () => {

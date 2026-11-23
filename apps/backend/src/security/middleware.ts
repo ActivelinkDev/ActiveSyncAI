@@ -39,6 +39,9 @@ declare global {
   namespace Express { interface Request { session?: Session } }
 }
 
+/** /api, /API, /Api/… — o Express não distingue maiúsculas nos caminhos por omissão, por isso as camadas também não. */
+export const isApiPath = (p: string) => /^\/api(\/|$)/i.test(p);
+
 // ----- Cabeçalhos -----
 export function securityHeaders(): RequestHandler {
   return (req, res, next) => {
@@ -62,7 +65,7 @@ export function securityHeaders(): RequestHandler {
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     if (opts.secureCookies) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
-    if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+    if (isApiPath(req.path)) res.setHeader('Cache-Control', 'no-store');
     next();
   };
 }
@@ -72,7 +75,7 @@ const PUBLIC_API = new Set(['/api/auth/login', '/api/auth/me']);
 
 export function requireSession(): RequestHandler {
   return (req, res, next) => {
-    if (!req.path.startsWith('/api/') || PUBLIC_API.has(req.path)) return next();
+    if (!isApiPath(req.path) || PUBLIC_API.has(req.path)) return next();
     const s = getSession(sessionToken(req));
     if (!s) { res.status(401).json({ error: 'not_authenticated' }); return; }
     req.session = s;
@@ -83,13 +86,13 @@ export function requireSession(): RequestHandler {
 // ----- Origem (CSRF): escritas só a partir da própria app -----
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 export function requireSameOrigin(): RequestHandler {
-  return (req, res, next) => {
-    if (SAFE.has(req.method) || !req.path.startsWith('/api/')) return next();
+  return async (req, res, next) => {
+    if (SAFE.has(req.method) || !isApiPath(req.path)) return next();
     const origin = req.headers.origin;
     let ok = false;
     try { ok = !!origin && new URL(origin).host === req.headers.host; } catch { ok = false; }
     if (!ok) {
-      audit('access.denied.origin', { ip: clientIp(req), detail: `${req.method} ${req.path} origin=${origin ?? '-'}` });
+      await audit('access.denied.origin', { ip: clientIp(req), detail: `${req.method} ${req.path} origin=${origin ?? '-'}` });
       res.status(403).json({ error: 'bad_origin' });
       return;
     }
@@ -99,15 +102,18 @@ export function requireSameOrigin(): RequestHandler {
 
 // ----- Ações sensíveis: ficam no registo de segurança (quem, quando, o quê) -----
 export const DANGEROUS: { method: string; path: RegExp; label: string }[] = [
-  { method: 'POST', path: /^\/api\/suprides\/sync-familias$/, label: 'Sync completo para a Shopify' },
-  { method: 'POST', path: /^\/api\/suprides\/sync-familias-cache$/, label: 'Sync completo para a Shopify' },
-  { method: 'POST', path: /^\/api\/suprides\/sync-stock$/, label: 'Sync de stock para a Shopify' },
-  { method: 'POST', path: /^\/api\/suprides\/reconcile-removes$/, label: 'Retirar produtos de coleções na Shopify' },
-  { method: 'POST', path: /^\/api\/suprides\/sync-images(\/dedupe)?\/?$/, label: 'Imagens na Shopify' },
-  { method: 'POST', path: /^\/api\/suprides\/menu\/sync$/, label: 'Menu na Shopify' },
-  { method: 'POST', path: /^\/api\/suprides\/public-menu\/publish$/, label: 'Publicar menu na Shopify' },
-  { method: 'POST', path: /^\/api\/scheduler\/run-now$/, label: 'Executar agora (importação + sync)' },
-  { method: 'PUT', path: /^\/api\/suprides\/admin\/(connection|settings)$/, label: 'Alterar ligações/definições' },
+  { method: 'POST', path: /^\/api\/suprides\/sync-familias$/i, label: 'Sync completo para a Shopify' },
+  { method: 'POST', path: /^\/api\/suprides\/sync-familias-cache$/i, label: 'Sync completo para a Shopify' },
+  { method: 'POST', path: /^\/api\/suprides\/sync-stock$/i, label: 'Sync de stock para a Shopify' },
+  { method: 'POST', path: /^\/api\/suprides\/reconcile-removes$/i, label: 'Retirar produtos de coleções na Shopify' },
+  { method: 'POST', path: /^\/api\/suprides\/sync-images(\/dedupe)?\/?$/i, label: 'Imagens na Shopify' },
+  { method: 'POST', path: /^\/api\/suprides\/menu\/sync$/i, label: 'Menu na Shopify' },
+  { method: 'POST', path: /^\/api\/suprides\/public-menu\/publish$/i, label: 'Publicar menu na Shopify' },
+  { method: 'POST', path: /^\/api\/scheduler\/run-now$/i, label: 'Executar agora (importação + sync)' },
+  { method: 'POST', path: /^\/api\/campanhas\/\d+\/agendar$/i, label: 'Agendar campanha (preços na loja)' },
+  { method: 'POST', path: /^\/api\/campanhas\/\d+\/desagendar$/i, label: 'Desagendar campanha' },
+  { method: 'POST', path: /^\/api\/campanhas\/\d+\/cancelar$/i, label: 'Cancelar campanha (repõe preços na loja)' },
+  { method: 'PUT', path: /^\/api\/suprides\/admin\/(connection|settings)$/i, label: 'Alterar ligações/definições' },
 ];
 
 export function dangerousAction(req: Request) {
@@ -115,9 +121,9 @@ export function dangerousAction(req: Request) {
 }
 
 export function auditDangerousActions(): RequestHandler {
-  return (req, _res, next) => {
+  return async (req, _res, next) => {
     const d = dangerousAction(req);
-    if (d) audit('action', { ip: clientIp(req), user: req.session?.username, detail: `${d.label} (${req.method} ${req.path})` });
+    if (d) await audit('action', { ip: clientIp(req), user: req.session?.username, detail: `${d.label} (${req.method} ${req.path})` });
     next();
   };
 }

@@ -87,11 +87,11 @@ export function ipAllowed(remote: string | undefined, subnets: Subnet[]): boolea
   });
 }
 
-export function ipFilter(subnets: Subnet[], onDeny?: (ip: string, req: Request) => void) {
-  return (req: Request, res: Response, next: NextFunction) => {
+export function ipFilter(subnets: Subnet[], onDeny?: (ip: string, req: Request) => void | Promise<void>) {
+  return async (req: Request, res: Response, next: NextFunction) => {
     const remote = req.socket?.remoteAddress;
     if (ipAllowed(remote, subnets)) return next();
-    onDeny?.(normalizeRemote(remote), req);
+    await onDeny?.(normalizeRemote(remote), req);
     // Sem detalhes: não confirmar que há aqui uma aplicação.
     res.status(403).end();
   };

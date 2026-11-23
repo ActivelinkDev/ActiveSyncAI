@@ -1,0 +1,18 @@
+{%- comment -%}
+  Uma marca da secção "As nossas marcas" (sections/marcas.liquid).
+  Liga à página da marca na loja (produtos com este "vendor").
+{%- endcomment -%}
+{%- assign nome = marca.nome.value -%}
+<li class="marcas__item">
+  <a href="{{ nome | url_for_vendor }}" title="{{ nome | escape }}">
+    {%- if marca.logo.value != blank -%}
+      {{ marca.logo.value | image_url: width: 400 | image_tag: alt: nome, loading: 'lazy', widths: '200, 400' }}
+      {%- if settings.show_name -%}<span class="marcas__nome">{{ nome | escape }}</span>{%- endif -%}
+    {%- else -%}
+      <span class="marcas__nome">{{ nome | escape }}</span>
+    {%- endif -%}
+    {%- if settings.show_count -%}
+      <span class="marcas__qtd">{{ marca.produtos.value }} produto{% if marca.produtos.value != 1 %}s{% endif %}</span>
+    {%- endif -%}
+  </a>
+</li>

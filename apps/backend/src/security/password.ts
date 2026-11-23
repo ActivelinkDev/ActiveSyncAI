@@ -3,9 +3,8 @@
  * Formato: scrypt$N$r$p$<sal base64>$<hash base64>
  */
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
-import { dataPath } from '../utils/data-dir';
+import { sql } from 'kysely';
+import { getMssql } from '../db/mssql';
 
 const N = 1 << 17, R = 8, P = 1, KEYLEN = 64;
 const MAXMEM = 256 * 1024 * 1024;
@@ -46,21 +45,27 @@ export function passwordProblem(password: string, username?: string): string | n
 // ----- Conta (uma só) -----
 export interface Account { username: string; passwordHash: string; changedAt: string }
 
-const ACCOUNT_FILE = () => path.join(dataPath('security'), 'account.json');
-
-export function loadAccount(): Account | null {
-  try {
-    const a = JSON.parse(fs.readFileSync(ACCOUNT_FILE(), 'utf8'));
-    return a?.username && a?.passwordHash ? a : null;
-  } catch { return null; }
+export async function loadAccount(): Promise<Account | null> {
+  const row = await getMssql().selectFrom('app_account')
+    .select(['username', 'password_hash', 'changed_at']).executeTakeFirst();
+  return row ? { username: row.username, passwordHash: row.password_hash, changedAt: row.changed_at.toISOString() } : null;
 }
 
-export function saveAccount(a: Account): void {
-  const dir = dataPath('security');
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = ACCOUNT_FILE() + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(a, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, ACCOUNT_FILE());
+/** A consola pode mudar o nome da conta. A substituição tem de ser atómica. */
+export async function saveAccount(account: Account): Promise<void> {
+  await getMssql().transaction().execute(async trx => {
+    await sql`DELETE FROM app_account WITH (TABLOCKX)`.execute(trx);
+    await trx.insertInto('app_account').values({
+      username: account.username, password_hash: account.passwordHash, changed_at: account.changedAt,
+    }).execute();
+  });
+}
+
+export async function changePassword(account: Account, passwordHash: string): Promise<boolean> {
+  const result = await getMssql().updateTable('app_account')
+    .set({ password_hash: passwordHash, changed_at: new Date().toISOString() })
+    .where('username', '=', account.username).where('password_hash', '=', account.passwordHash).executeTakeFirst();
+  return result.numUpdatedRows === 1n;
 }
 
 /** Hash de referência para comparar quando a conta não existe (mesmo tempo de resposta). */

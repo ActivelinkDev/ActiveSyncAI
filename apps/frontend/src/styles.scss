@@ -325,7 +325,9 @@ app-login { position: relative; z-index: 1; display: block; }
 .suprides-mapeamento-dialog .mat-mdc-dialog-surface,
 .suprides-mapeamento-dialog .mdc-dialog__surface,
 .suprides-margens-dialog .mat-mdc-dialog-surface,
-.suprides-margens-dialog .mdc-dialog__surface {
+.suprides-margens-dialog .mdc-dialog__surface,
+.campaigns-dialog .mat-mdc-dialog-surface,
+.campaigns-dialog .mdc-dialog__surface {
   padding: 0 !important;
   border-radius: 12px !important;
   overflow: hidden !important;
@@ -339,7 +341,9 @@ app-login { position: relative; z-index: 1; display: block; }
 .suprides-mapeamento-dialog .mat-mdc-dialog-content,
 .suprides-mapeamento-dialog .mdc-dialog__content,
 .suprides-margens-dialog .mat-mdc-dialog-content,
-.suprides-margens-dialog .mdc-dialog__content {
+.suprides-margens-dialog .mdc-dialog__content,
+.campaigns-dialog .mat-mdc-dialog-content,
+.campaigns-dialog .mdc-dialog__content {
   flex: 1 1 0;
   min-height: 0;
   overflow: hidden !important;

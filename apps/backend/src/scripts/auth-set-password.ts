@@ -7,6 +7,7 @@
  * no próximo arranque (as sessões vivem em memória).
  */
 import "dotenv/config";
+import { closeMssql } from "../db/mssql";
 import readline from "readline";
 import { loadAccount, saveAccount, hashPassword, passwordProblem, MIN_PASSWORD_LENGTH } from "../security/password";
 import { audit } from "../security/audit";
@@ -24,7 +25,7 @@ function ask(question: string, hidden = false): Promise<string> {
 
 async function main() {
   if (!process.stdin.isTTY) { console.error("Correr numa consola interativa."); process.exit(1); }
-  const current = loadAccount();
+  const current = await loadAccount();
   console.log(current ? `Conta atual: ${current.username} (palavra-passe mudada em ${current.changedAt})` : "Ainda não há conta.");
 
   let username = (await ask(`Utilizador${current ? ` [${current.username}]` : ""}: `)).trim() || current?.username || "";
@@ -37,9 +38,9 @@ async function main() {
   const p2 = await ask("Repetir: ", true);
   if (p1 !== p2) { console.error("As palavras-passe não coincidem."); process.exit(1); }
 
-  saveAccount({ username, passwordHash: await hashPassword(p1), changedAt: new Date().toISOString() });
-  audit("password.changed", { user: username, detail: "na consola do servidor" });
+  await saveAccount({ username, passwordHash: await hashPassword(p1), changedAt: new Date().toISOString() });
+  await audit("password.changed", { user: username, detail: "na consola do servidor" });
   console.log("Conta guardada. Reiniciar o serviço para terminar sessões abertas.");
 }
 
-main().catch(e => { console.error("ERRO:", e?.message ?? e); process.exit(1); });
+main().catch(e => { console.error("ERRO:", e?.message ?? e); process.exitCode = 1; }).finally(closeMssql);

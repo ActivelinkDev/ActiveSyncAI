@@ -1,7 +1,7 @@
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { AuthService } from '../../auth/auth.service';
 import { ChangePasswordDialog } from '../../auth/change-password-dialog';
-import { RouterOutlet } from '@angular/router';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { CommonModule } from '@angular/common';
 
 import { MaterialModule } from '../../material.module';
@@ -10,37 +10,27 @@ import { PreferencesDialog } from '../../pages/preferences/preferences-dialog';
 import { TagsDialog } from '../../pages/tags/tags-dialog';
 import { SupridesMapeamentoDialog } from '../../pages/suprides/mapeamento/suprides-mapeamento-dialog';
 import { SupridesMargensDialog } from '../../pages/suprides/margens/suprides-margens-dialog';
+import { CampaignsDialog } from '../../pages/campaigns/campaigns-dialog';
 import { interval, Subscription } from 'rxjs';
 
-declare global {
-  interface Window {
-    electronWindow?: {
-      minimize: () => void;
-      toggleMaximize: () => Promise<boolean>;
-      close: () => void;
-    };
-    electronAPI?: {
-      minimize: () => void;
-      toggleMaximize: () => Promise<boolean>;
-      close: () => void;
-    };
-  }
-}
-
 const API = '' + '/api';
+const COLLAPSED_KEY = 'shell.sidebarCollapsed';
+
+function readCollapsed(): boolean {
+  try { return localStorage.getItem(COLLAPSED_KEY) === '1'; } catch { return false; }
+}
 
 @Component({
   selector: 'app-windows-shell',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, MaterialModule],
+  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive, MaterialModule],
   templateUrl: './windows-shell.html',
   styleUrls: ['./windows-shell.scss']
 })
 export class WindowsShellComponent implements OnInit, OnDestroy {
   readonly auth = inject(AuthService);
-  /** Botões de janela só dentro do Electron; no browser não fazem sentido. */
-  readonly isElectron = !!(window.electronWindow || window.electronAPI);
-  maximized = false;
+  /** Barra lateral recolhida (só ícones); lembrada neste browser. */
+  collapsed = readCollapsed();
   syncing = false;
   syncDone = 0;
   syncTotal = 0;
@@ -75,6 +65,11 @@ export class WindowsShellComponent implements OnInit, OnDestroy {
     this.sub?.unsubscribe();
     this.evtSource?.close();
     this._cacheEs?.close();
+  }
+
+  toggleCollapsed(): void {
+    this.collapsed = !this.collapsed;
+    try { localStorage.setItem(COLLAPSED_KEY, this.collapsed ? '1' : '0'); } catch { /* sem storage: só não fica lembrado */ }
   }
 
   toggleLogs(): void { this.showLogs = !this.showLogs; }
@@ -139,6 +134,15 @@ export class WindowsShellComponent implements OnInit, OnDestroy {
     });
   }
 
+  openCampaigns(): void {
+    this.dialog.open(CampaignsDialog, {
+      width: '98vw', maxWidth: '1600px', height: '92vh', maxHeight: '92vh',
+      // Fecha só pelo X (que avisa se houver alterações por gravar).
+      disableClose: true,
+      panelClass: ['b2b-dialog', 'campaigns-dialog']
+    });
+  }
+
   openChangePassword(): void {
     this.dialog.open(ChangePasswordDialog, { panelClass: 'glass-dialog' });
   }
@@ -148,12 +152,4 @@ export class WindowsShellComponent implements OnInit, OnDestroy {
     this.auth.logout();
   }
 
-  minimize(): void { window.electronWindow?.minimize?.(); }
-
-  async toggleMaximize(): Promise<void> {
-    if (!window.electronWindow?.toggleMaximize) return;
-    this.maximized = await window.electronWindow.toggleMaximize();
-  }
-
-  close(): void { window.electronWindow?.close?.(); }
 }

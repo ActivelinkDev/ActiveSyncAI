@@ -20,6 +20,7 @@ export type AlertKind =
   | 'verify-mismatch'      // verificação depois do sync encontrou diferenças
   | 'service-crash'        // erro inesperado no serviço
   | 'price-history'        // não foi possível registar o histórico de preços (regra dos 30 dias)
+  | 'campaign'             // temporizador das campanhas: envio de preços falhou
   | 'test';
 
 const THROTTLE_MS = 60 * 60_000;

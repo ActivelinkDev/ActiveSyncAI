@@ -1,4 +1,4 @@
-import { loadMenuItems, loadShopifyCollectionMapping } from '../repositories/store';
+import type { MenuNode, ShopifyCollectionMapping } from '../types';
 import { normTaxonomyValue } from '../services/taxonomy';
 
 export interface CollectionHierarchy {
@@ -7,9 +7,8 @@ export interface CollectionHierarchy {
   childCount?: number;
 }
 
-export function collectionHierarchyLookup(): Map<string, CollectionHierarchy> {
+export function collectionHierarchyLookup(nodes: MenuNode[]): Map<string, CollectionHierarchy> {
   const out = new Map<string, CollectionHierarchy>();
-  const nodes = loadMenuItems();
   for (const l1 of nodes) {
     if (l1.shopifyId) out.set(l1.shopifyId, { childCount: (l1.children || []).length });
     for (const l2 of l1.children || []) {
@@ -22,7 +21,7 @@ export function collectionHierarchyLookup(): Map<string, CollectionHierarchy> {
   return out;
 }
 
-export function buildActiveCollectionIndexes(collMap: ReturnType<typeof loadShopifyCollectionMapping>) {
+export function buildActiveCollectionIndexes(collMap: ShopifyCollectionMapping) {
   const hidden = collMap.hidden || {};
   const build = (section: Record<string, string[]> = {}) => {
     const out = new Map<string, string[]>();
@@ -59,7 +58,7 @@ export function uniqueIds(ids: string[]): string[] {
 function parentAcceptsLine(
   collId: string,
   line: string,
-  collMap: ReturnType<typeof loadShopifyCollectionMapping>,
+  collMap: ShopifyCollectionMapping,
   hierarchyById: Map<string, CollectionHierarchy>
 ): boolean {
   const hidden = collMap.hidden || {};
@@ -75,7 +74,7 @@ export function buildDerivedCollectionIds(
   line: string,
   family: string,
   subFamily: string,
-  collMap: ReturnType<typeof loadShopifyCollectionMapping>,
+  collMap: ShopifyCollectionMapping,
   indexes: ReturnType<typeof buildActiveCollectionIndexes>,
   hierarchyById: Map<string, CollectionHierarchy>
 ): string[] {

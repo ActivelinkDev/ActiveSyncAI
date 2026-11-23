@@ -1,14 +1,13 @@
 import { Router, Request, Response } from "express";
 import OpenAI from "openai";
-import { getSqlite } from "../../db/sqlite";
+import { getMssql } from "../../db/mssql";
+import { sql } from "kysely";
+import { getProductBySku } from "../../repositories/suprides-cache";
 import {
   resolveTagGroupsForNode,
-  upsertProductTagValue,
-  isPopulateDone,
-  markPopulateDone,
-  getProductTagValues,
+  saveAiProductTags,
 } from "../repositories/tags";
-import { getDescendants } from "../services/menu-resolver";
+import { getProductsForMenuNode } from "../services/menu-resolver";
 import { loadCustomPrompt, loadConnectionSettings } from "../repositories/store";
 
 // ── Inline utilities (previously in routes/tags/shared) ──────────────────────
@@ -104,45 +103,17 @@ function sanitize(s: string | null | undefined): string {
   return (s || "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").substring(0, MAX_TEXT);
 }
 
-// ── Tag groups + values from SQLite ──────────────────────────────────────────
-
-function fetchSpTagGroups(tagGroupIds: number[]): TGV[] {
-  const db = getSqlite();
-  const groups: TGV[] = [];
-  for (const id of tagGroupIds) {
-    const g = db.prepare(
-      "SELECT id, nome, descricao, unidade FROM sp_tag_groups WHERE id = ?"
-    ).get(id) as any;
-    if (!g) continue;
-    const vals = db.prepare(
-      "SELECT value FROM sp_tag_values WHERE tag_group_id = ? ORDER BY value"
-    ).all(id) as { value: string }[];
-    groups.push({
-      id: g.id,
-      nome: g.nome,
-      descricao: g.descricao,
-      unidade: g.unidade ?? null,
-      values: vals.map(v => v.value),
-    });
+async function fetchSpTagGroups(tagGroupIds: number[]): Promise<TGV[]> {
+  const { rows } = await sql<{ id: number; nome: string; descricao?: string; unidade?: string; value: string | null }>`
+    SELECT g.id, g.name AS nome, g.description AS descricao, g.unit AS unidade, v.value
+    FROM tag_groups g LEFT JOIN tag_values v ON v.tag_group_id = g.id
+    WHERE g.id IN (SELECT value FROM OPENJSON(${JSON.stringify(tagGroupIds)})) ORDER BY v.value`.execute(getMssql());
+  const groups = new Map<number, TGV>();
+  for (const { id, nome, descricao, unidade, value } of rows) {
+    if (!groups.has(id)) groups.set(id, { id, nome, descricao, unidade, values: [] });
+    if (value !== null) groups.get(id)!.values.push(value);
   }
-  return groups;
-}
-
-// ── Products for a menu node ──────────────────────────────────────────────────
-
-function getProductsForNode(shopifyId: string, directOnly: boolean): { sku: string; name: string }[] {
-  const db = getSqlite();
-  if (directOnly) {
-    return db.prepare(
-      "SELECT sku, COALESCE(name, sku) AS name FROM suprides_products WHERE shopify_node_id = ? ORDER BY name"
-    ).all(shopifyId) as { sku: string; name: string }[];
-  }
-  const ids = getDescendants(shopifyId);
-  if (!ids.length) return [];
-  const ph = ids.map(() => "?").join(",");
-  return db.prepare(
-    `SELECT sku, COALESCE(name, sku) AS name FROM suprides_products WHERE shopify_node_id IN (${ph}) ORDER BY name`
-  ).all(...ids) as { sku: string; name: string }[];
+  return tagGroupIds.flatMap(id => groups.has(id) ? [groups.get(id)!] : []);
 }
 
 // ── Core AI bulk ──────────────────────────────────────────────────────────────
@@ -155,32 +126,54 @@ async function runAiBulk(
   isClosedFn:  () => boolean,
   send:        (d: object) => void,
   skipMapped = false,
-): Promise<{ populated: number; failed: number }> {
+): Promise<{ populated: number; failed: number; total: number }> {
   const openai     = new OpenAI({ apiKey });
   const aiValidIds = new Set(tagGroups.map(t => t.id));
-  const sysPrompt  = buildAiPopulateSystemPrompt(tagGroups, label, loadCustomPrompt());
-  const db         = getSqlite();
+  const sysPrompt  = buildAiPopulateSystemPrompt(tagGroups, label, await loadCustomPrompt());
+
+  // Uma só consulta: quem já foi processado e quantas tags do nó já tem preenchidas.
+  const { rows: status } = await sql<{ sku: string; processed: number; filled: number }>`
+    SELECT s.value AS sku,
+      CASE WHEN EXISTS (SELECT 1 FROM ai_tagged_products d WHERE d.sku = s.value) THEN 1 ELSE 0 END AS processed,
+      (SELECT COUNT(*) FROM product_tags t WHERE t.sku = s.value AND LTRIM(RTRIM(t.value)) <> ''
+         AND t.tag_group_id IN (SELECT value FROM OPENJSON(${JSON.stringify([...aiValidIds])}))) AS filled
+    FROM OPENJSON(${JSON.stringify(products.map(p => p.sku))}) s`.execute(getMssql());
+  const statusBySku = new Map(status.map(s => [s.sku, s]));
+  let skippedComplete = 0, skippedProcessed = 0;
+  const pending = products.filter(prod => {
+    const s = statusBySku.get(prod.sku);
+    if (s && s.filled >= aiValidIds.size) { skippedComplete++; return false; }   // a IA não tem nada a acrescentar
+    if (skipMapped && s?.processed)        { skippedProcessed++; return false; }
+    return true;
+  });
+  if (skippedComplete || skippedProcessed) {
+    send({ type: "log", level: "info", ref: "", msg:
+      `[SKIP] ${skippedComplete} com todas as tags preenchidas` +
+      (skipMapped ? `, ${skippedProcessed} já processados` : "") +
+      ` — ${pending.length} de ${products.length} vão à IA` });
+  }
 
   let populated = 0, failed = 0, globalIdx = 0;
-  send({ type: "start", total: products.length });
+  send({ type: "start", total: pending.length });
 
-  for (let i = 0; i < products.length; i += BATCH_SIZE) {
+  for (let i = 0; i < pending.length; i += BATCH_SIZE) {
     if (isClosedFn()) break;
 
-    const batch = products.slice(i, i + BATCH_SIZE);
-    const batchReady: { prod: { sku: string; name: string }; row: any }[] = [];
+    const batch = pending.slice(i, i + BATCH_SIZE);
+    type ProductDetails = { sku: string; name: string | null; brand: string | null; color: string | null;
+      description: string | null; short_description: string | null };
+    const { rows } = await sql<ProductDetails>`SELECT p.sku, p.name, p.brand, p.color, p.description,
+      p.short_description FROM products p
+      WHERE p.sku IN (SELECT value FROM OPENJSON(${JSON.stringify(batch.map(p => p.sku))}))`
+      .execute(getMssql());
+    const bySku = new Map(rows.map(row => [row.sku, row]));
+    const batchReady: { prod: { sku: string; name: string }; row: ProductDetails }[] = [];
 
     for (const prod of batch) {
       globalIdx++;
-      if (skipMapped && isPopulateDone(prod.sku)) {
-        send({ type: "log", level: "info", ref: prod.sku, msg: `[SKIP] ${prod.sku} — já processado` });
-        continue;
-      }
-      send({ type: "progress", current: globalIdx, total: products.length, ref: prod.sku, design: prod.name });
+      const row = bySku.get(prod.sku);
+      send({ type: "progress", current: globalIdx, total: pending.length, ref: prod.sku, design: prod.name });
 
-      const row = db.prepare(
-        "SELECT brand, name, cor, description, short_description FROM suprides_products WHERE sku = ?"
-      ).get(prod.sku) as any;
       if (!row) {
         send({ type: "log", level: "warn", ref: prod.sku, msg: `[SKIP] ${prod.sku} — não encontrado na BD` });
         failed++;
@@ -194,7 +187,7 @@ async function runAiBulk(
     const userPayload = batchReady.map(({ prod, row }) => {
       const entry: Record<string, any> = { ref: prod.sku, design: sanitize(row.name) };
       if (row.brand)             entry.marca           = sanitize(row.brand);
-      if (row.cor)               entry.cor             = sanitize(row.cor);
+      if (row.color)             entry.cor             = sanitize(row.color);
       if (row.short_description) entry.descricao_curta = sanitize(row.short_description);
       if (row.description)       entry.descricao       = sanitize(row.description);
       return entry;
@@ -273,19 +266,13 @@ async function runAiBulk(
         const after  = values.map(t => `gid${t.tag_group_id}="${t.value}"`).join(", ") || "(nenhuma)";
         send({ type: "log", level: "info", ref: prod.sku, msg: `[VALIDAR] ${prod.sku} — [${before}] → [${after}]` });
 
-        const existing    = getProductTagValues(prod.sku);
-        const existingMap = new Map(existing.map(e => [e.tag_group_id, e.value]));
-
-        for (const { tag_group_id, value } of values) {
-          if (!value.trim()) continue;
-          if (existingMap.has(tag_group_id)) {
-            send({ type: "log", level: "info", ref: prod.sku, msg: `[SKIP-TAG] gid${tag_group_id} — já existe "${existingMap.get(tag_group_id)}"` });
-            continue;
+        const existing = await saveAiProductTags(prod.sku, values);
+        const proposed = new Set(values.filter(tag => tag.value.trim()).map(tag => tag.tag_group_id));
+        for (const { tag_group_id, value } of existing) {
+          if (proposed.has(tag_group_id)) {
+            send({ type: "log", level: "info", ref: prod.sku, msg: `[SKIP-TAG] gid${tag_group_id} — já existe "${value}"` });
           }
-          upsertProductTagValue(prod.sku, tag_group_id, value);
         }
-
-        markPopulateDone(prod.sku);
         populated++;
       } catch (e: any) {
         send({ type: "log", level: "error", ref: prod.sku, msg: `[ERRO] ${prod.sku} — ${e?.message ?? e}` });
@@ -293,11 +280,11 @@ async function runAiBulk(
       }
     }
 
-    if (i + BATCH_SIZE < products.length && !isClosedFn())
+    if (i + BATCH_SIZE < pending.length && !isClosedFn())
       await new Promise(r => setTimeout(r, 150));
   }
 
-  return { populated, failed };
+  return { populated, failed, total: pending.length };
 }
 
 // ── Bulk SSE helper (usado pelos 3 endpoints de nível) ────────────────────────
@@ -315,30 +302,32 @@ async function handleBulkSse(
 
   if (!shopifyId) { send({ type: "error", message: "shopifyId é obrigatório" }); res.end(); return; }
 
-  const apiKey = loadConnectionSettings().openaiApiKey || process.env.OPENAI_API_KEY;
+  const apiKey = (await loadConnectionSettings()).openaiApiKey || process.env.OPENAI_API_KEY;
   if (!apiKey) { send({ type: "error", message: "OPENAI_API_KEY não configurada no servidor." }); res.end(); return; }
 
   try {
-    const products = getProductsForNode(shopifyId, directOnly);
+    const rows = await getProductsForMenuNode(shopifyId, directOnly);
+    const products = rows.map(row => ({ sku: row.sku, name: row.name ?? row.sku }));
     if (!products.length) {
       send({ type: "done", total: 0, populated: 0, failed: 0, reason: "Nenhum produto neste nó de menu." });
       res.end(); return;
     }
 
-    const tagGroupIds = resolveTagGroupsForNode(shopifyId);
+    const tagGroupIds = await resolveTagGroupsForNode(shopifyId);
     if (!tagGroupIds.length) {
       send({ type: "done", total: products.length, populated: 0, failed: 0, reason: "Nenhuma tag definida para este nó (nem nos seus ancestrais). Define tags nos separadores Grupos/Famílias/Subfamílias." });
       res.end(); return;
     }
 
-    const tagGroups = fetchSpTagGroups(tagGroupIds);
+    const tagGroups = await fetchSpTagGroups(tagGroupIds);
     if (!tagGroups.length) {
       send({ type: "done", total: products.length, populated: 0, failed: 0, reason: "Tags não encontradas na base de dados." });
       res.end(); return;
     }
 
-    const { populated, failed } = await runAiBulk(products, tagGroups, label, apiKey, isClosedFn, send, skipMapped);
-    send({ type: "done", total: products.length, populated, failed });
+    const { populated, failed, total } = await runAiBulk(products, tagGroups, label, apiKey, isClosedFn, send, skipMapped);
+    send({ type: "done", total, populated, failed,
+      ...(total === 0 ? { reason: "Todos os produtos deste nó já estão mapeados." } : {}) });
     res.end();
   } catch (err: any) {
     send({ type: "error", message: err.message || "Erro interno do servidor" });
@@ -350,20 +339,20 @@ async function handleBulkSse(
 
 router.get("/ai-populate-subfamilia", (req: Request, res: Response) => {
   const directOnly = req.query.directOnly === "true";
-  handleBulkSse(req, res, directOnly);
+  return handleBulkSse(req, res, directOnly);
 });
 
 // ── GET /ai-populate-familia ──────────────────────────────────────────────────
 
 router.get("/ai-populate-familia", (req: Request, res: Response) => {
   const directOnly = req.query.directOnly === "true";
-  handleBulkSse(req, res, directOnly);
+  return handleBulkSse(req, res, directOnly);
 });
 
 // ── GET /ai-populate-grupo ────────────────────────────────────────────────────
 
 router.get("/ai-populate-grupo", (req: Request, res: Response) => {
-  handleBulkSse(req, res, false);
+  return handleBulkSse(req, res, false);
 });
 
 // ── POST /ai-populate-produto (single product, devolve sugestões) ─────────────
@@ -377,27 +366,24 @@ router.post("/ai-populate-produto", async (req: Request, res: Response) => {
   if (!ref)             return res.status(400).json({ error: "ref é obrigatório" });
   if (!tagGroupIds.length) return res.status(400).json({ error: "tagGroupIds é obrigatório" });
 
-  const apiKey = loadConnectionSettings().openaiApiKey || process.env.OPENAI_API_KEY;
+  const apiKey = (await loadConnectionSettings()).openaiApiKey || process.env.OPENAI_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "OPENAI_API_KEY não configurada no servidor." });
 
   try {
-    const db  = getSqlite();
-    const row = db.prepare(
-      "SELECT brand, name, cor, description, short_description FROM suprides_products WHERE sku = ?"
-    ).get(ref) as any;
+      const row = await getProductBySku(ref);
     if (!row) return res.status(404).json({ error: "Produto não encontrado" });
 
-    const tagGroups = fetchSpTagGroups(tagGroupIds);
+    const tagGroups = await fetchSpTagGroups(tagGroupIds);
     if (!tagGroups.length) return res.status(400).json({ error: "Nenhuma tag válida encontrada" });
 
     const diagLogs: { level: string; msg: string }[] = [];
     const dlog = (level: string, msg: string) => diagLogs.push({ level, msg });
 
-    const sysPrompt = buildAiPopulateSystemPrompt(tagGroups, ref, loadCustomPrompt());
+    const sysPrompt = buildAiPopulateSystemPrompt(tagGroups, ref, await loadCustomPrompt());
 
     const userEntry: Record<string, any> = { ref, design: sanitize(row.name) };
     if (row.brand)             userEntry.marca           = sanitize(row.brand);
-    if (row.cor)               userEntry.cor             = sanitize(row.cor);
+    if (row.color)             userEntry.cor             = sanitize(row.color);
     if (row.short_description) userEntry.descricao_curta = sanitize(row.short_description);
     if (row.description)       userEntry.descricao       = sanitize(row.description);
 

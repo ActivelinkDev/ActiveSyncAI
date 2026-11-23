@@ -1,10 +1,9 @@
-/* Moldura da app — glassmorphism suave (tokens em styles.scss). Layout igual ao anterior. */
+/* Moldura da app — barra lateral à esquerda + área principal (tokens em styles.scss). */
 
 :host {
   position: relative;
   z-index: 1;
   display: flex;
-  flex-direction: column;
   gap: 10px;
   height: 100vh;
   width: 100vw;
@@ -15,205 +14,227 @@
   overflow: hidden;
 }
 
-/* ===================== TITLEBAR ===================== */
+.drag { -webkit-app-region: drag; }
+.no-drag,
+.drag button,
+.drag a { -webkit-app-region: no-drag; }
 
-.titlebar {
-  -webkit-app-region: drag;
-  height: 52px;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
+/* ===================== BARRA LATERAL ===================== */
+
+.sidebar {
+  width: 236px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: width .18s ease;
   @extend %glass;
+
+  &.collapsed { width: 68px; }
 }
 
-.titlebar-brand {
+.sidebar-brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 18px 0 12px;
-  height: 100%;
+  height: 44px;
+  padding: 0 4px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
 }
 
 .brand-icon {
-  width: 30px !important;
-  height: 30px !important;
-  font-size: 18px !important;
-  line-height: 30px !important;
+  flex-shrink: 0;
+  width: 36px !important;
+  height: 36px !important;
+  font-size: 20px !important;
+  line-height: 36px !important;
   text-align: center;
-  border-radius: 9px;
+  border-radius: 10px;
   color: #fff;
   background: var(--brand);
 }
 
 .brand-name {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 800;
   letter-spacing: -.2px;
-  color: var(--ink);
+  white-space: nowrap;
   user-select: none;
 }
 .brand-ai { color: var(--brand-text); }
 
-.no-drag { -webkit-app-region: no-drag; }
-
-.titlebar .menu {
+.nav {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  padding-right: 10px;
-
-  button[mat-button] {
-    color: var(--muted);
-    font-weight: 600;
-    font-size: 13.5px;
-    border-radius: 9px;
-    &:hover { background: var(--hover); color: var(--ink); }
-  }
-
-  button[mat-icon-button].btn-settings {
-    color: var(--muted);
-    &:hover { background: var(--hover); color: var(--ink); }
-  }
-
-  .user-btn {
-    margin-left: 6px;
-    padding: 0 10px 0 6px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    .user-avatar {
-      display: inline-grid;
-      place-items: center;
-      width: 26px; height: 26px;
-      border-radius: 50%;
-      margin-right: 8px;
-      font-weight: 700; font-size: 12px;
-      color: var(--brand-text);
-      background: var(--brand-soft);
-    }
-    .user-name { color: var(--ink); font-weight: 600; }
-  }
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
-.window-controls {
-  display: flex;
-  align-items: center;
-  padding-right: 4px;
-
-  .wc-btn {
-    width: 44px;
-    height: 40px;
-    border-radius: 9px;
-    color: var(--muted);
-    mat-icon { font-size: 17px; }
-    &:hover { background: var(--hover); color: var(--ink); }
-  }
-  .close:hover { background: var(--bad) !important; color: #fff; }
+.nav-bottom {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  overflow: visible;
 }
 
-/* ===================== RIBBON ===================== */
+.nav-section {
+  padding: 14px 12px 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  white-space: nowrap;
+}
 
-.ribbon {
-  display: grid;
-  grid-template-columns: 1fr auto;
+.nav-divider {
+  height: 1px;
+  margin: 8px 6px;
+  background: var(--line);
+}
+
+/* Item de navegação (link ou botão) */
+.nav-item,
+.user-btn {
+  display: flex;
+  align-items: center;
   gap: 12px;
-  padding: 12px 14px;
-  flex-shrink: 0;
-  @extend %glass;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, color .15s;
 
-  .ribbon-left {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    align-items: center;
+  mat-icon {
+    flex-shrink: 0;
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
   }
 
-  /* Todos os botões da barra com o mesmo estilo de vidro; o sync usa a cor da marca. */
-  .ribbon-btn {
-    height: 50px !important;
-    min-width: 190px !important;
-    border-radius: 12px !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    gap: 10px !important;
-    padding: 0 16px !important;
-    font-size: 12.5px !important;
-    font-weight: 700 !important;
-    letter-spacing: .03em !important;
-    color: var(--ink) !important;
-    background: var(--glass-strong) !important;
-    border: 1px solid var(--glass-border) !important;
-    box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-hi) !important;
-    transition: box-shadow .18s, transform .15s, background .18s !important;
+  &:hover { background: var(--hover); color: var(--ink); }
 
-    mat-icon { font-size: 20px; width: 20px; height: 20px; color: var(--brand-text); }
-
-    &:hover {
-      transform: translateY(-1px);
-      background: var(--glass-hover) !important;
-      box-shadow: var(--shadow), inset 0 1px 0 var(--glass-hi) !important;
-    }
-
-    &--sync {
-      color: #fff !important;
-      background: var(--brand) !important;
-      border-color: transparent !important;
-      mat-icon { color: #fff; }
-      &:hover { background: var(--brand-hover) !important; box-shadow: 0 6px 18px rgba(255,51,0,.25) !important; }
-    }
-
-    &--resume {
-      background: transparent !important;
-      color: var(--brand-text) !important;
-    }
-
-    &[disabled] { opacity: .7; transform: none; }
-  }
-
-  .ribbon-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-
-    .panel {
-      border-radius: 12px;
-      padding: 6px 16px;
-      min-width: 140px;
-      background: var(--glass-strong);
-      border: 1px solid var(--glass-border);
-
-      .small-label {
-        font-size: 10.5px;
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: .08em;
-        font-weight: 600;
-      }
-      .count {
-        font-size: 22px;
-        font-weight: 700;
-        text-align: center;
-        color: var(--ink);
-        font-variant-numeric: tabular-nums;
-      }
-    }
-
-    .toolbar-icons {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-
-      button {
-        color: var(--muted);
-        border-radius: 10px;
-        &:hover { background: var(--hover); color: var(--ink); }
-      }
-    }
+  &.active {
+    color: #fff;
+    background: var(--brand);
+    box-shadow: 0 6px 18px rgba(255, 51, 0, .22);
+    .nav-sub { color: rgba(255, 255, 255, .8); }
   }
 }
 
-/* ===================== CONTEÚDO ===================== */
+.nav-item:has(.nav-sub) { min-height: 50px; }
+
+.nav-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.nav-title { overflow: hidden; text-overflow: ellipsis; }
+.nav-sub {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collapsed {
+  .nav-item, .user-btn { justify-content: center; padding: 0; }
+  .sidebar-brand { justify-content: center; padding: 0; }
+}
+
+/* Botão de importação Suprides — ação principal, cor da marca */
+.sync-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 42px;
+  margin: 14px 0 4px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  background: var(--brand);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .15s, box-shadow .15s;
+
+  mat-icon { font-size: 20px; width: 20px; height: 20px; }
+
+  &:hover:not([disabled]) { background: var(--brand-hover); box-shadow: 0 6px 18px rgba(255, 51, 0, .25); }
+  &[disabled] { opacity: .75; cursor: default; }
+}
+
+.spin { animation: spin 1.1s linear infinite; }
+@keyframes spin { to { transform: rotate(-360deg); } }
+
+/* Conta + estado da loja no fundo */
+.user-btn {
+  min-height: 52px;
+  margin-top: 6px;
+  color: var(--ink);
+
+  .user-avatar {
+    flex-shrink: 0;
+    display: inline-grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--brand-text);
+    background: var(--brand-soft);
+  }
+  .nav-text { flex: 1; }
+  .user-more { color: var(--muted-2); font-size: 18px; width: 18px; height: 18px; }
+}
+
+.store {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+
+/* ===================== ÁREA PRINCIPAL ===================== */
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 
 .content {
   flex: 1;
@@ -233,6 +254,7 @@
   position: absolute;
   top: 0; right: 0; bottom: 0;
   width: 420px;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   z-index: 1000;
@@ -266,49 +288,12 @@
   }
 }
 
-/* ===================== STATUS BAR ===================== */
-
-.statusbar {
-  height: 38px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 14px;
-  flex-shrink: 0;
-  @extend %glass;
+/* Ecrãs estreitos: a barra fica só com ícones */
+@media (max-width: 900px) {
+  .sidebar:not(.collapsed) { width: 68px; }
 }
 
-.statusbar-left { display: flex; align-items: center; gap: 8px; }
-
-.status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ok);
-  flex-shrink: 0;
-}
-
-.status-text { font-size: 12.5px; color: var(--muted); font-weight: 500; }
-.sep { opacity: .4; color: var(--muted); font-size: 12.5px; }
-
-.statusbar-right { display: flex; align-items: center; gap: 5px; }
-
-.statusbar-spark {
-  font-size: 16px !important;
-  width: 16px !important;
-  height: 16px !important;
-  color: var(--brand-text);
-}
-
-.statusbar-brand {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--muted);
-  user-select: none;
-}
-.statusbar-ai { color: var(--brand-text); font-weight: 800; }
-
-/* Vidro partilhado pelas barras */
+/* Vidro partilhado */
 %glass {
   position: relative;
   background: var(--glass);

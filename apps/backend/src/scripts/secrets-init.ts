@@ -10,8 +10,8 @@ import "dotenv/config";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import { isEncrypted, SECRET_FIELDS } from "../security/secret-box";
-import { dataPath } from "../utils/data-dir";
+import { encryptSecret, isEncrypted, SECRET_FIELDS } from "../security/secret-box";
+import { getMssql, closeMssql } from "../db/mssql";
 
 const envPath = path.resolve(process.cwd(), ".env");
 
@@ -19,7 +19,7 @@ function ensureKey(): boolean {
   if (process.env.SECRETS_KEY?.trim()) return false;
   const key = crypto.randomBytes(32).toString("base64");
   const prefix = fs.existsSync(envPath) && !fs.readFileSync(envPath, "utf8").endsWith("\n") ? "\n" : "";
-  fs.appendFileSync(envPath, `${prefix}\n# Chave das credenciais cifradas em data/ (não partilhar; guardar cópia segura)\nSECRETS_KEY=${key}\n`);
+  fs.appendFileSync(envPath, `${prefix}\n# Chave das credenciais cifradas no SQL Server (não partilhar; guardar cópia segura)\nSECRETS_KEY=${key}\n`);
   process.env.SECRETS_KEY = key;
   return true;
 }
@@ -28,17 +28,17 @@ async function main() {
   const created = ensureKey();
   console.log(created ? "SECRETS_KEY criada no .env." : "SECRETS_KEY já existia.");
 
-  // Importar só depois de a chave estar no ambiente.
-  const sup = await import("../suprides/repositories/store");
-  for (const [name, store] of [["suprides", sup]] as const) {
-    const s = store.loadConnectionSettings() as Record<string, any>;
-    const plain = SECRET_FIELDS.filter(f => typeof s[f] === "string" && s[f]);
-    if (!plain.length) { console.log(`${name}: sem credenciais guardadas em data/.`); continue; }
-    store.saveConnectionSettings(s);
-    const check = JSON.parse(fs.readFileSync(dataPath(name, "connection-settings.json"), "utf8"));
-    const ok = plain.every(f => isEncrypted(check[f]));
-    console.log(`${name}: ${plain.length} credencial(is) ${ok ? "cifrada(s)" : "— ATENÇÃO: verificação falhou"}.`);
-  }
+  const count = await getMssql().transaction().setIsolationLevel("serializable").execute(async db => {
+    const rows = await db.selectFrom("connection_settings").select(["name", "value"])
+      .where("name", "in", SECRET_FIELDS).execute();
+    const plain = rows.filter(row => row.value && !isEncrypted(row.value));
+    for (const row of plain) {
+      await db.updateTable("connection_settings").set({ value: encryptSecret(row.value) })
+        .where("name", "=", row.name).execute();
+    }
+    return plain.length;
+  });
+  console.log(`${count} credencial(is) cifrada(s) no SQL Server.`);
 }
 
-main().catch(e => { console.error("ERRO:", e?.message ?? e); process.exit(1); });
+main().catch(() => { console.error("Falha ao preparar as credenciais."); process.exitCode = 1; }).finally(closeMssql);

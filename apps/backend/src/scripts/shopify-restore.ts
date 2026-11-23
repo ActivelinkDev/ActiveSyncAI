@@ -10,9 +10,12 @@
  * Nunca apaga produtos nem volta a acrescentar coleções.
  */
 import "dotenv/config";
+import { withConnectionSettings } from "../suprides/repositories/store";
+import { closeMssql } from "../db/mssql";
 import { loadSnapshot } from "../services/shopify-snapshot";
 import { diffSnapshot, applyRestore } from "../services/shopify-restore";
 import { readAllProducts } from "../suprides/api/shopify-read";
+import { recordPricesFromShop } from "../services/price-history";
 
 function parseArgs(argv: string[]) {
   const args = { snapshot: "", skus: undefined as string[] | undefined, apply: false };
@@ -73,7 +76,12 @@ async function main() {
   const r = await applyRestore(diff, snap.products, (d, t) => process.stdout.write(`\r${d}/${t}`));
   console.log(`\nRepostos: ${r.productsUpdated}; coleções retiradas: ${r.collectionRemovals}; erros: ${r.errors.length}`);
   for (const e of r.errors.slice(0, 20)) console.log(`  ${e.productId}: ${e.error}`);
+  // A reposição pode mudar preços: registar no histórico (regra dos 30 dias), também com erros.
+  if (r.productsUpdated > 0) {
+    console.log("A registar o histórico de preços…");
+    await recordPricesFromShop("RESTORE", `reposição de ${args.snapshot}`, search);
+  }
   if (r.errors.length) process.exit(1);
 }
 
-main().catch(e => { console.error("\nERRO:", e?.response?.data ?? e?.message ?? e); process.exit(1); });
+withConnectionSettings(main).catch(e => { console.error("\nERRO:", e?.response?.data ?? e?.message ?? e); process.exitCode = 1; }).finally(closeMssql);

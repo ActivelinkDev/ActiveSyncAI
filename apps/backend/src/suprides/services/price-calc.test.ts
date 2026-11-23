@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeMoney, applyMargin, applyRounding } from './price-calc';
+import { normalizeMoney, applyMargin, applyRounding, applyRoundingNotBelow } from './price-calc';
 import { parseStock, parseStockStatus } from '../api/suprides-api';
 
 test('normalizeMoney: formatos de preço', () => {
@@ -31,6 +31,22 @@ test('applyRounding: abaixo de 50 € → ,49 ou ,99; a partir de 50 € → ,90
   assert.equal(r(49.995), 49.99);
   assert.equal(r(50.00), 50.90);
   assert.equal(r(123.95), 123.90); // nota: acima de 50 € pode arredondar para baixo
+});
+
+test('applyRoundingNotBelow: nunca abaixo de custo + IVA (venda com prejuízo)', () => {
+  const r = (price: number, min: number) => Math.round(applyRoundingNotBelow(price, min) * 100) / 100;
+  // Casos reais do sync de 19/11: custo × 1,23 sem margem
+  assert.equal(r(27.64 * 1.23, 27.64 * 1.23), 34.49);    // 33,9972 → 33,99 seria prejuízo → ,49 seguinte
+  assert.equal(r(146.33 * 1.23, 146.33 * 1.23), 180.90); // 179,99 → 179,90 seria prejuízo → 180,90
+  assert.equal(r(41.4 * 1.23, 41.4 * 1.23), 51.90);      // 50,922 → 50,90 → 51,90
+  // ,49 → ,99 e passagem dos 50 €
+  assert.equal(r(12.30, 12.60), 12.99);
+  assert.equal(r(49.80, 49.995), 50.90);
+  // Mínimo exato ao cêntimo: 34,49 cumpre um mínimo de 34,49
+  assert.equal(r(34.20, 34.49), 34.49);
+  // Com margem suficiente, igual ao arredondamento normal
+  assert.equal(r(15.375, 12.30), applyRounding(15.375));
+  assert.equal(r(123.95, 100), 123.90);
 });
 
 test('parseStock: texto da Suprides → quantidade', () => {

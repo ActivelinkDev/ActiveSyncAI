@@ -1,10 +1,11 @@
 import {
-  upsertProductsBatch, countProducts, countActiveProducts, markMissingAsRemoved, SupridesProduct,
+  upsertProductsBatch, countProducts, countActiveProducts, markMissingAsRemoved, withCatalogueLock, SupridesProduct,
 } from "../../repositories/suprides-cache";
 import { getProducts, parseStock, parseStockStatus } from "../api/suprides-api";
 import { normalizeMoney } from "./price-calc";
 import { rebuildProductNodeIds } from "./menu-resolver";
 import { loadPublicMenu } from "../repositories/store";
+import { withdrawLossMakers } from "../repositories/campaigns";
 import { logLine } from "../../utils/logger";
 
 export type ImportEvent =
@@ -61,15 +62,15 @@ export function mapApiProduct(p: any): SupridesProduct {
     family:            p.Family ?? p.family ? String(p.Family ?? p.family) : null,
     sub_family:        p.sub_family   ? String(p.sub_family)   : null,
     name:              p.name         ? String(p.name)         : null,
-    price:             p.price != null ? (parseFloat(normalizeMoney(String(p.price))) || null) : null,
-    pvpr:              p.pvpr  != null ? (parseFloat(normalizeMoney(String(p.pvpr)))  || null) : null,
+    cost:              p.price != null ? (parseFloat(normalizeMoney(String(p.price))) || null) : null,
+    msrp:              p.pvpr  != null ? (parseFloat(normalizeMoney(String(p.pvpr)))  || null) : null,
     stock:             parseStock(p.stock != null ? String(p.stock) : undefined),
     stock_status:      parseStockStatus(p.stock != null ? String(p.stock) : undefined),
     images:            Array.isArray(p.images) && p.images.length > 0
                          ? JSON.stringify(p.images.map(String).filter(Boolean))
                          : null,
     weight:            p.weight != null ? Number(p.weight) : null,
-    cor:               p.cor          ? String(p.cor)          : null,
+    color:             p.cor          ? String(p.cor)          : null,
     description:       cleanHtml(p.description),
     manufacturer:      p.manufacturer ? String(p.manufacturer) : null,
     short_description: cleanHtml(p.short_description),
@@ -95,7 +96,7 @@ async function fetchPageWithRetry(page: number, fetchPage: PageFetcher = getProd
 }
 
 /**
- * Importa o catálogo completo da API Suprides para o SQLite.
+ * Importa o catálogo completo da API Suprides para o SQL Server.
  * - Uma página que falhe (após retries) aborta a importação: os produtos já gravados
  *   ficam atualizados, mas nada é marcado como retirado.
  * - SKUs ausentes são marcados como retirados (sem stock), nunca apagados.
@@ -114,9 +115,18 @@ export async function runSupridesImport(
   };
 
   try {
+    return await withCatalogueLock(importCatalogue);
+  } catch (err: any) {
+    say({ type: "error", message: err?.message ?? "Erro desconhecido na importação" });
+    throw err;
+  } finally {
+    importRunning = false;
+  }
+
+  async function importCatalogue() {
     say({ type: "start", message: "A iniciar importação da API Suprides…" });
 
-    const activeBefore = countActiveProducts();
+    const activeBefore = await countActiveProducts();
     const seenSkus = new Set<string>();
     let waveStart = 1;
     let totalSaved = 0;
@@ -141,7 +151,7 @@ export async function runSupridesImport(
       }
 
       if (waveMapped.length > 0) {
-        upsertProductsBatch(waveMapped);
+        await upsertProductsBatch(waveMapped);
         waveMapped.forEach(p => seenSkus.add(p.sku));
         totalSaved += waveMapped.length;
         say({ type: "log", saved: totalSaved, message: `Guardados ${waveMapped.length} produtos (total: ${totalSaved})` });
@@ -161,25 +171,28 @@ export async function runSupridesImport(
                  `Nenhum produto foi marcado como retirado. Se o catálogo encolheu mesmo, repetir com ?allowLargeRemoval=1.`,
       });
     } else {
-      removed = markMissingAsRemoved(seenSkus);
+      removed = await markMissingAsRemoved(seenSkus);
       if (removed > 0) say({ type: "log", message: `${removed} produtos deixaram de vir na API: marcados como retirados (sem stock).` });
     }
 
-    const total = countProducts();
-    const publicMenu = loadPublicMenu();
+    const total = await countProducts();
+    const publicMenu = await loadPublicMenu();
     if (publicMenu.nodes && publicMenu.nodes.length > 0) {
-      const { updated } = rebuildProductNodeIds();
+      const { updated } = await rebuildProductNodeIds();
       say({ type: "log", message: `Node IDs reconstruídos: ${updated} produtos mapeados ao menu.` });
     } else {
       say({ type: "log", message: "Menu público vazio — shopify_node_id não reconstruído (corre Sync Shopify)." });
     }
 
+    // Campanhas ativas: retirar os produtos cuja promoção passou a dar prejuízo (o custo subiu).
+    // O sync ou o temporizador das campanhas repõem depois o preço base na loja.
+    const withdrawn = await withdrawLossMakers();
+    if (withdrawn.length) {
+      say({ type: "log", message: `Campanhas: ${withdrawn.length} produto(s) retirado(s) da promoção por prejuízo (custo subiu): ` +
+        withdrawn.slice(0, 10).map(w => `${w.sku} (campanha ${w.campaignId})`).join(", ") });
+    }
+
     say({ type: "done", inserted: totalSaved, total, removed, message: `Concluído — ${totalSaved} produtos importados.` });
     return { saved: totalSaved, total, removed, removalSkipped };
-  } catch (err: any) {
-    say({ type: "error", message: err?.message ?? "Erro desconhecido na importação" });
-    throw err;
-  } finally {
-    importRunning = false;
   }
 }

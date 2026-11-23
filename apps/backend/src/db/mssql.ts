@@ -7,8 +7,6 @@
  *   MSSQL_DATABASE=ActiveSyncAI        MSSQL_USER / MSSQL_PASSWORD (login SQL só desta BD)
  *   MSSQL_ENCRYPT=1 (por omissão)      MSSQL_TRUST_CERT=1 (certificado autoassinado da instância)
  *
- * Kysely constrói o SQL (com tipos) e serve tanto SQLite como SQL Server, o que permite
- * migrar módulo a módulo.
  */
 import { Kysely, MssqlDialect } from 'kysely';
 import * as Tedious from 'tedious';
@@ -40,10 +38,25 @@ function connectionConfig(): Tedious.ConnectionConfiguration {
 
 let db: Kysely<any> | null = null;
 
+/**
+ * Travão dos testes (NODE_ENV=test, ver .env.test): só uma base cujo nome termine em _Test,
+ * e nunca com credenciais da Shopify no ambiente — um teste nunca toca na base nem na loja reais.
+ */
+export function assertTestEnvironmentSafe(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.NODE_ENV !== 'test') return;
+  if (!/_test$/i.test(env.MSSQL_DATABASE ?? '')) {
+    throw new Error(`NODE_ENV=test só pode usar uma base de teste (*_Test), não "${env.MSSQL_DATABASE}".`);
+  }
+  if (env.SHOPIFY_STORE || env.SHOPIFY_PASSWORD) {
+    throw new Error('NODE_ENV=test não pode ter credenciais da Shopify (SHOPIFY_STORE/SHOPIFY_PASSWORD).');
+  }
+}
+
 /** Instância partilhada (pool de ligações). */
 export function getMssql<DB = any>(): Kysely<DB> {
   if (!mssqlConfigured()) throw new Error('SQL Server não configurado (MSSQL_* no .env).');
   if (!db) {
+    assertTestEnvironmentSafe();
     db = new Kysely<any>({
       dialect: new MssqlDialect({
         tarn: { ...Tarn, options: { min: 0, max: 10 } },

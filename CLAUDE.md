@@ -4,7 +4,7 @@ Orientações para o Claude Code neste repositório.
 
 ## O que é
 
-Middleware que importa o catálogo de fornecedores (**Suprides**; a Esprinet foi retirada em 18/11) para **SQLite** local, calcula preços (margem por coleção + IVA + arredondamento), gera tags por IA (OpenAI) e publica na **Shopify** (produtos, preço, stock, imagens, coleções, menu).
+Middleware que importa o catálogo de fornecedores (**Suprides**; a Esprinet foi retirada em 18/11) para **SQL Server 2022**, calcula preços (margem por coleção + IVA + arredondamento), gera tags por IA (OpenAI) e publica na **Shopify** (produtos, preço, stock, imagens, coleções, menu).
 Já não usa MSSQL/ERP, Haeger nem Macorlux — se encontrares referências a isso, são restos do projeto de origem.
 
 ## Comandos
@@ -16,7 +16,7 @@ npm run build && npm start # compilar e arrancar dist/
 npx tsc --noEmit           # verificação de tipos
 npm run shopify:snapshot   # estado atual da loja → JSON
 npm run auth:set-password  # criar/repor a conta (no servidor, consola interativa)
-npm run secrets:init       # gera SECRETS_KEY no .env e cifra credenciais em data/
+npm run secrets:init       # gera SECRETS_KEY no .env e cifra credenciais na tabela connection_settings
 npm test                   # testes (node:test)
 npm run alert:test         # email de teste dos alertas (SMTP_* e ALERT_* no .env)
 
@@ -24,8 +24,6 @@ npm run alert:test         # email de teste dos alertas (SMTP_* e ALERT_* no .en
 npm start
 npm run build -- --configuration production
 
-# Electron (apps/electron) — opcional
-npm run dev
 ```
 
 Cada app tem o seu `node_modules` (não há workspace npm).
@@ -34,18 +32,17 @@ Cada app tem o seu `node_modules` (não há workspace npm).
 
 ```
 apps/backend/src/
-  index.ts                 monta routers, middleware de acesso, migrations SQLite, agendamento
-  db/sqlite.ts             getSqlite() — singleton (WAL). Usar sempre este.
-  db/migrate-*.ts          criação/migração de tabelas no arranque
+  index.ts                 monta routers, middleware de acesso, migrações SQL Server, agendamento
+  db/mssql.ts              pool Kysely + Tedious partilhado
+  db/mssql-migrations.ts   esquema SQL Server aplicado no arranque (um só fornecedor, nomes de colunas genéricos)
   utils/data-dir.ts        DATA_ROOT / dataPath() — todos os caminhos de dados passam por aqui
   utils/logger.ts          logLine() → SSE /api/logs/stream (aparece no painel da interface)
   services/scheduler.ts    sync diário (importação + sync Shopify), lock partilhado
   scripts/                 comandos npm (snapshot, restauro, sync, imagens, conta, credenciais)
   suprides/                núcleo: api/ (clientes Suprides e Shopify), routes/, services/, repositories/
 apps/frontend/src/app/
-  ui/windows-shell/        shell: barra de título, painel de logs, barra de estado
+  ui/windows-shell/        shell: barra lateral (navegação, sync, conta), painel de logs
   pages/                   funcionalidades em MatDialog (Mapeamento, Margens, Tags, Preferências…)
-apps/electron/             janela frameless que carrega o frontend
 ```
 
 Rotas Angular: só `/dashboard` e `/erros`; o resto são diálogos.
@@ -53,7 +50,7 @@ Rotas Angular: só `/dashboard` e `/erros`; o resto são diálogos.
 ### Fluxos principais
 | Fluxo | Endpoint |
 |---|---|
-| Importação Suprides → SQLite | `GET /api/suprides/cache/sync` (SSE) |
+| Importação Suprides → SQL Server | `GET /api/suprides/cache/sync` (SSE) |
 | Sync completo → Shopify | `POST /api/suprides/sync-familias` (+ `/dry-run`) |
 | Sync só de estado | `POST /api/suprides/sync-stock` |
 | Tags por IA | `GET /api/suprides/tags/ai-populate-*` (SSE) |
@@ -63,7 +60,9 @@ Rotas Angular: só `/dashboard` e `/erros`; o resto são diálogos.
 - Produto **sem custo** → rascunho; nunca publicado com preço inventado.
 - Produto **retirado pelo fornecedor** → rascunho, nunca apagado (travão a 85 % na importação).
 - Importação, sync completo e sync de stock partilham um lock (409 se já houver um a correr).
-- O agendamento está **desligado por omissão** (`AUTO_SYNC_ENABLED`); só o servidor de produção o liga.
+- O agendamento está **desligado por omissão** (`AUTO_SYNC_ENABLED`); só o servidor de produção o liga. O mesmo para o temporizador das campanhas (`CAMPAIGN_TICKER_ENABLED`).
+- **Preços (regra dos 30 dias / Omnibus):** fora de campanha não há preço riscado; o preço nunca fica abaixo de custo + IVA (`price-engine.ts`); qualquer escrita de preços na loja tem de gravar o histórico (`price-history.ts`). As campanhas nunca alteram `products.base_price`.
+- Testes de integração só na base `*_Test` (`.env.test`, fora do git); `getMssql` recusa outra base com `NODE_ENV=test`.
 
 ## Segurança (Etapa 3)
 - Todos os pedidos: filtro pelo IP real (`ALLOWED_SUBNETS`), sessão obrigatória em `/api` (exceto login), `Origin` da própria app nas escritas. Ver `src/security/`.
@@ -72,11 +71,11 @@ Rotas Angular: só `/dashboard` e `/erros`; o resto são diálogos.
 - Credenciais nunca saem inteiras da API (`connection-view.ts`).
 
 ## Dados e configuração
-- Tudo em `DATA_DIR` (por omissão `apps/backend/data/`): SQLite + configs JSON editáveis pela interface (que têm prioridade sobre o `.env`).
+- SQL Server guarda catálogo, tags, configuração, segurança e agendamento. Os valores definidos pela interface têm prioridade sobre o `.env`. A pasta `DATA_DIR` guarda planos, snapshots e relatórios.
 - Variáveis de ambiente: ver `apps/backend/.env.example`.
 - **Nunca versionar** `.env`, `data/`, snapshots, planos do dry-run, nem domínios, tokens ou IPs reais. Correr `node tools/check-secrets.mjs` antes de cada commit.
 
 ## Cuidados
 - **Não correr** `sync-familias`, `sync-stock`, `run-now` nem escrever na loja real sem confirmação explícita. Para testar, usar o dry-run e um `DATA_DIR` com uma cópia dos dados.
 - TypeScript em modo `strict` nas três apps.
-- Queries SQLite sempre parametrizadas.
+- Queries SQL Server sempre parametrizadas.

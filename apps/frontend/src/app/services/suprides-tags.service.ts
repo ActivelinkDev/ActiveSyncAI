@@ -3,8 +3,6 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom, Observable, Subscriber } from 'rxjs';
 import type { TagGroup, TagValue, Familia, Subfamilia, Produto, ProdutoTagValue } from './tags.service';
 
-type SupplierKey = 'suprides';
-
 interface MenuTreeNode {
   shopifyId: string;
   title: string;
@@ -20,19 +18,9 @@ const GERAL = '(Geral)';
 
 @Injectable({ providedIn: 'root' })
 export class SupridesTagsService {
-  private supplier: SupplierKey = 'suprides';
+  private readonly base = '/api/suprides/tags';
 
   constructor(private http: HttpClient) {}
-
-  withSupplier(supplier: SupplierKey): SupridesTagsService {
-    const clone = new SupridesTagsService(this.http);
-    clone.supplier = supplier;
-    return clone;
-  }
-
-  private get base(): string {
-    return `/api/${this.supplier}/tags`;
-  }
 
   // ── Tag Groups (interface idêntica ao TagsService) ──────────────────────────
 
@@ -353,7 +341,7 @@ export class SupridesTagsService {
       const isGeral   = subfamilia === GERAL || familia === GERAL;
       const shopifyId = await this.resolveShopifyId(3, grupo, familia, subfamilia);
       if (!shopifyId) throw new Error('Nó de menu não encontrado para esta subfamília');
-      const skip  = localStorage.getItem('skipMapped') === 'true';
+      const skip  = localStorage.getItem('skipMapped') !== 'false';
       const label = [grupo, familia, subfamilia].filter(s => s !== GERAL).join(' › ');
       return `${this.base}/ai-populate-subfamilia?shopifyId=${encodeURIComponent(shopifyId)}&directOnly=${isGeral}&skipMapped=${skip}&label=${encodeURIComponent(label)}`;
     });
@@ -364,7 +352,7 @@ export class SupridesTagsService {
       const isGeral   = familia === GERAL;
       const shopifyId = await this.resolveShopifyId(2, grupo, familia);
       if (!shopifyId) throw new Error('Nó de menu não encontrado para esta família');
-      const skip  = localStorage.getItem('skipMapped') === 'true';
+      const skip  = localStorage.getItem('skipMapped') !== 'false';
       const label = [grupo, familia].filter(s => s !== GERAL).join(' › ');
       return `${this.base}/ai-populate-familia?shopifyId=${encodeURIComponent(shopifyId)}&directOnly=${isGeral}&skipMapped=${skip}&label=${encodeURIComponent(label)}`;
     });
@@ -374,7 +362,7 @@ export class SupridesTagsService {
     return this._sseObservable(async () => {
       const shopifyId = await this.resolveShopifyId(1, grupo);
       if (!shopifyId) throw new Error('Nó de menu não encontrado para este grupo');
-      const skip = localStorage.getItem('skipMapped') === 'true';
+      const skip = localStorage.getItem('skipMapped') !== 'false';
       return `${this.base}/ai-populate-grupo?shopifyId=${encodeURIComponent(shopifyId)}&skipMapped=${skip}&label=${encodeURIComponent(grupo)}`;
     });
   }
@@ -425,10 +413,4 @@ export class SupridesTagsService {
   getDiscardedPairs(): Promise<any[]> { return Promise.resolve([]); }
   restoreDiscardedPair(_w: string): Promise<void> { return Promise.resolve(); }
 
-  setSource(s: string): void {
-    if (s === 'suprides') {
-      this.supplier = s;
-      this.invalidateMenuCache();
-    }
-  }
 }

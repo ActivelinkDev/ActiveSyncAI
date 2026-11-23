@@ -1,0 +1,99 @@
+{%- comment -%}
+  As nossas marcas — secção para a homepage.
+  Os dados vêm dos metaobjects "marca", mantidos pelo integrador ActiveSyncAI:
+    nome, produtos, visivel  → atualizados em cada sync (só marcas com produtos à venda ficam visíveis)
+    logo, ordem, oculta      → editados à mão em Conteúdo → Metaobjects → Marca
+  Ordem: primeiro as marcas com "Ordem" preenchida (1, 2, 3…), depois as restantes pela ordem de criação.
+{%- endcomment -%}
+
+{%- liquid
+  assign marcas = shop.metaobjects.marca.values
+  assign com_ordem = ''
+  for i in (1..99)
+    for m in marcas
+      if m.ordem.value == i and m.visivel.value == true and m.oculta.value != true
+        assign com_ordem = com_ordem | append: m.system.handle | append: ','
+      endif
+    endfor
+  endfor
+  assign total = 0
+  for m in marcas
+    if m.visivel.value == true and m.oculta.value != true
+      assign total = total | plus: 1
+    endif
+  endfor
+-%}
+
+{%- if total > 0 -%}
+<section class="marcas section-{{ section.id }}" aria-label="{{ section.settings.heading | escape }}">
+  <div class="page-width">
+    {%- if section.settings.heading != blank -%}
+      <h2 class="marcas__titulo">{{ section.settings.heading | escape }}</h2>
+    {%- endif -%}
+
+    <ul class="marcas__lista" role="list">
+      {%- comment -%} 1.º as que têm ordem definida {%- endcomment -%}
+      {%- for i in (1..99) -%}
+        {%- for m in marcas -%}
+          {%- if m.ordem.value == i and m.visivel.value == true and m.oculta.value != true -%}
+            {%- render 'marca-item', marca: m, settings: section.settings -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {%- comment -%} depois as restantes {%- endcomment -%}
+      {%- for m in marcas -%}
+        {%- assign chave = m.system.handle | append: ',' -%}
+        {%- if m.visivel.value == true and m.oculta.value != true -%}
+          {%- unless com_ordem contains chave -%}
+            {%- render 'marca-item', marca: m, settings: section.settings -%}
+          {%- endunless -%}
+        {%- endif -%}
+      {%- endfor -%}
+    </ul>
+  </div>
+</section>
+{%- endif -%}
+
+<style>
+  .section-{{ section.id }} { padding: {{ section.settings.padding }}px 0; }
+  .marcas__titulo { text-align: center; margin: 0 0 2rem; }
+  .marcas__lista {
+    list-style: none; margin: 0; padding: 0;
+    display: grid; gap: 1.5rem;
+    grid-template-columns: repeat(auto-fill, minmax({{ section.settings.logo_width }}px, 1fr));
+    align-items: center;
+  }
+  .marcas__item a {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem;
+    min-height: {{ section.settings.logo_height | plus: 24 }}px; padding: .75rem;
+    text-decoration: none; color: inherit; border-radius: 8px;
+    transition: opacity .2s, transform .2s;
+  }
+  .marcas__item a:hover { transform: translateY(-2px); }
+  .marcas__item img {
+    max-height: {{ section.settings.logo_height }}px; width: auto; max-width: 100%; object-fit: contain;
+    {%- if section.settings.grayscale %} filter: grayscale(1); opacity: .75;{% endif %}
+    transition: filter .2s, opacity .2s;
+  }
+  .marcas__item a:hover img { filter: none; opacity: 1; }
+  .marcas__nome { font-weight: 600; text-align: center; }
+  .marcas__qtd { font-size: .8em; opacity: .6; }
+</style>
+
+{% schema %}
+{
+  "name": "As nossas marcas",
+  "tag": "div",
+  "class": "section-marcas",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Título", "default": "As nossas marcas" },
+    { "type": "range", "id": "logo_height", "label": "Altura do logótipo", "min": 30, "max": 120, "step": 5, "unit": "px", "default": 60 },
+    { "type": "range", "id": "logo_width", "label": "Largura mínima de cada marca", "min": 100, "max": 260, "step": 10, "unit": "px", "default": 160 },
+    { "type": "checkbox", "id": "grayscale", "label": "Logótipos a cinzento (cor ao passar o rato)", "default": true },
+    { "type": "checkbox", "id": "show_name", "label": "Mostrar o nome mesmo com logótipo", "default": false },
+    { "type": "checkbox", "id": "show_count", "label": "Mostrar n.º de produtos", "default": false },
+    { "type": "range", "id": "padding", "label": "Espaço vertical", "min": 0, "max": 100, "step": 4, "unit": "px", "default": 48 }
+  ],
+  "presets": [{ "name": "As nossas marcas" }]
+}
+{% endschema %}

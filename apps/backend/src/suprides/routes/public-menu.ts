@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { loadPublicMenu, loadShopifyCollectionMapping, loadAdminSettings } from '../repositories/store';
+import { loadMenuItems, loadPublicMenu, loadShopifyCollectionMapping, loadAdminSettings } from '../repositories/store';
 import { buildPublicMenuTree, publishPublicMenu } from '../services/public-menu';
 import { getAllProducts } from '../services/products-cache';
 import { parseStock } from '../api/suprides-api';
@@ -14,11 +14,11 @@ const router = Router();
 
 /**
  * GET /api/suprides/public-menu/audit
- * Devolve o conteúdo atual de public-menu-items.json com stats.
+ * Devolve o conteúdo atual de menu público guardado com stats.
  */
-router.get('/audit', (_req, res) => {
+router.get('/audit', async (_req, res) => {
   try {
-    const file = loadPublicMenu();
+    const file = await loadPublicMenu();
     res.json({ stats: file.stats, nodes: file.nodes });
   } catch (e: any) {
     res.status(500).json({ error: 'Erro ao carregar menu público', detail: e.message });
@@ -27,22 +27,22 @@ router.get('/audit', (_req, res) => {
 
 /**
  * POST /api/suprides/public-menu/publish
- * Recalcula o menu público a partir da cache de produtos e publica no Shopify.
+ * Recalcula o menu público a partir da catálogo e publica no Shopify.
  * Query param:
- *   ?rebuild=true  (default) → recalcula activeCollectionIds da cache de produtos
- *   ?rebuild=false           → usa public-menu-items.json já existente, só republica
+ *   ?rebuild=true  (default) → recalcula activeCollectionIds da catálogo
+ *   ?rebuild=false           → usa menu público guardado já existente, só republica
  */
 router.post('/publish', async (req, res) => {
   const rebuild = req.query.rebuild !== 'false';
 
   try {
-    let publicMenuFile = loadPublicMenu();
+    let publicMenuFile = await loadPublicMenu();
 
     if (rebuild) {
       const all = await getAllProducts(false);
-      const collMap = loadShopifyCollectionMapping();
+      const collMap = await loadShopifyCollectionMapping();
       const indexes = buildActiveCollectionIndexes(collMap);
-      const hierarchyById = collectionHierarchyLookup();
+      const hierarchyById = collectionHierarchyLookup(await loadMenuItems());
 
       const activeIds = new Set<string>();
       for (const p of all) {
@@ -55,10 +55,10 @@ router.post('/publish', async (req, res) => {
         for (const id of ids) activeIds.add(id);
       }
 
-      publicMenuFile = buildPublicMenuTree([...activeIds]);
+      publicMenuFile = await buildPublicMenuTree([...activeIds]);
     }
 
-    const settings = loadAdminSettings() as any;
+    const settings = await loadAdminSettings();
     const handle = settings.publicMenuHandle || 'menu-publico';
     const title  = settings.publicMenuTitle  || 'Menu Público';
 

@@ -135,7 +135,7 @@ export async function applyRestore(
   before: SnapshotProduct[],
   onProgress?: (done: number, total: number) => void,
 ): Promise<ApplyResult> {
-  const http = makeGraphqlClient();
+  const http = await makeGraphqlClient();
   const beforeById = new Map(before.map(p => [p.productId, p]));
   const result: ApplyResult = { productsUpdated: 0, collectionRemovals: 0, errors: [] };
   let done = 0;

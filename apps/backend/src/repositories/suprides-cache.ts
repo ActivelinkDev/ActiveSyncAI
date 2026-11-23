@@ -1,4 +1,5 @@
-import { getSqlite } from "../db/sqlite";
+import { sql } from "kysely";
+import { getMssql } from "../db/mssql";
 
 export interface SupridesProduct {
   id?: number;
@@ -10,16 +11,17 @@ export interface SupridesProduct {
   family?: string | null;
   sub_family?: string | null;
   name?: string | null;
-  price?: number | null;
-  pvpr?: number | null;
+  cost?: number | null;          // preço de custo do fornecedor
+  msrp?: number | null;          // PVP recomendado pelo fornecedor
   stock?: number | null;
   stock_status?: string | null;
   images?: string | null;      // JSON array serializado
   weight?: number | null;
-  cor?: string | null;
+  color?: string | null;
   description?: string | null;
   manufacturer?: string | null;
   short_description?: string | null;
+  shopify_node_id?: string | null;
   imported_at?: string;
   updated_at?: string;
   shopify_product_id?: number | null;
@@ -27,169 +29,111 @@ export interface SupridesProduct {
   shopify_inventory_item_id?: number | null;
 }
 
-// ── Leitura ──────────────────────────────────────────────────────────────────
-
-export function getAllProducts(limit = 5000, offset = 0): SupridesProduct[] {
-  const db = getSqlite();
-  return db
-    .prepare("SELECT * FROM suprides_products ORDER BY id LIMIT ? OFFSET ?")
-    .all(limit, offset) as SupridesProduct[];
+function products() {
+  return getMssql().selectFrom("products");
 }
 
-export function getProductBySku(sku: string): SupridesProduct | null {
-  const db = getSqlite();
-  return (
-    (db
-      .prepare("SELECT * FROM suprides_products WHERE sku = ?")
-      .get(sku) as SupridesProduct) ?? null
-  );
+export async function getAllProducts(limit = 5000, offset = 0): Promise<SupridesProduct[]> {
+  if (!limit) return [];
+  return products().selectAll().orderBy("id").offset(offset).fetch(limit)
+    .$castTo<SupridesProduct>().execute();
 }
 
-export function countProducts(): number {
-  const db = getSqlite();
-  const row = db
-    .prepare("SELECT COUNT(*) as n FROM suprides_products")
-    .get() as { n: number };
+export async function getProductBySku(sku: string): Promise<SupridesProduct | null> {
+  return await products().selectAll().where("sku", "=", sku).$castTo<SupridesProduct>().executeTakeFirst() ?? null;
+}
+
+export async function countProducts(): Promise<number> {
+  const row = await products().select(sql<number>`COUNT(*)`.as("n")).executeTakeFirstOrThrow();
   return row.n;
 }
 
-export function getProductsByFamily(family: string): SupridesProduct[] {
-  const db = getSqlite();
-  return db
-    .prepare("SELECT * FROM suprides_products WHERE family = ? ORDER BY sku")
-    .all(family) as SupridesProduct[];
+export async function getProductsByFamily(family: string): Promise<SupridesProduct[]> {
+  return products().selectAll().where("family", "=", family).orderBy("sku").$castTo<SupridesProduct>().execute();
 }
 
-// ── Escrita ───────────────────────────────────────────────────────────────────
-
-export function upsertProduct(p: SupridesProduct): void {
-  const db = getSqlite();
-  const images =
-    p.images && typeof p.images !== "string"
-      ? JSON.stringify(p.images)
-      : (p.images ?? null);
-
-  db.prepare(`
-    INSERT INTO suprides_products
-      (sku, ean, part_number, brand, product_line, family, sub_family,
-       name, price, pvpr, stock, stock_status, images, weight, cor,
-       description, manufacturer, short_description, updated_at)
-    VALUES
-      (@sku, @ean, @part_number, @brand, @product_line, @family, @sub_family,
-       @name, @price, @pvpr, @stock, @stock_status, @images, @weight, @cor,
-       @description, @manufacturer, @short_description, datetime('now'))
-    ON CONFLICT(sku) DO UPDATE SET
-      ean              = excluded.ean,
-      part_number      = excluded.part_number,
-      brand            = excluded.brand,
-      product_line     = excluded.product_line,
-      family           = excluded.family,
-      sub_family       = excluded.sub_family,
-      name             = excluded.name,
-      price            = excluded.price,
-      pvpr             = excluded.pvpr,
-      stock            = excluded.stock,
-      stock_status     = excluded.stock_status,
-      images           = excluded.images,
-      images_synced    = CASE WHEN excluded.images IS NOT images THEN 0 ELSE images_synced END,
-      weight           = excluded.weight,
-      cor              = excluded.cor,
-      description      = excluded.description,
-      manufacturer     = excluded.manufacturer,
-      short_description = excluded.short_description,
-      removed_at       = NULL,
-      updated_at       = datetime('now')
-  `).run({ stock_status: null, ...p, images });
+export async function upsertProduct(p: SupridesProduct): Promise<void> {
+  await upsertProductsBatch([p]);
 }
 
-export function upsertProductsBatch(products: SupridesProduct[]): number {
-  const db = getSqlite();
-
-  const upsert = db.prepare(`
-    INSERT INTO suprides_products
-      (sku, ean, part_number, brand, product_line, family, sub_family,
-       name, price, pvpr, stock, stock_status, images, weight, cor,
-       description, manufacturer, short_description, updated_at)
-    VALUES
-      (@sku, @ean, @part_number, @brand, @product_line, @family, @sub_family,
-       @name, @price, @pvpr, @stock, @stock_status, @images, @weight, @cor,
-       @description, @manufacturer, @short_description, datetime('now'))
-    ON CONFLICT(sku) DO UPDATE SET
-      ean              = excluded.ean,
-      part_number      = excluded.part_number,
-      brand            = excluded.brand,
-      product_line     = excluded.product_line,
-      family           = excluded.family,
-      sub_family       = excluded.sub_family,
-      name             = excluded.name,
-      price            = excluded.price,
-      pvpr             = excluded.pvpr,
-      stock            = excluded.stock,
-      stock_status     = excluded.stock_status,
-      images           = excluded.images,
-      images_synced    = CASE WHEN excluded.images IS NOT images THEN 0 ELSE images_synced END,
-      weight           = excluded.weight,
-      cor              = excluded.cor,
-      description      = excluded.description,
-      manufacturer     = excluded.manufacturer,
-      short_description = excluded.short_description,
-      removed_at       = NULL,
-      updated_at       = datetime('now')
-  `);
-
-  const insertMany = db.transaction((rows: SupridesProduct[]) => {
-    for (const p of rows) {
-      const images =
-        p.images && typeof p.images !== "string"
-          ? JSON.stringify(p.images)
-          : (p.images ?? null);
-      upsert.run({ stock_status: null, ...p, images });
+/** A importação, o sync completo e o de stock partilham o mesmo bloqueio entre processos. */
+export function withCatalogueLock<T>(run: () => Promise<T>): Promise<T> {
+  return getMssql().connection().execute(async connection => {
+    const { rows } = await sql<{ status: number }>`
+      DECLARE @result int;
+      EXEC @result = sys.sp_getapplock @Resource = 'ActiveSyncAI.import.suprides',
+        @LockMode = 'Exclusive', @LockOwner = 'Session', @LockTimeout = 0, @DbPrincipal = 'public';
+      SELECT @result AS status`.execute(connection);
+    if (rows[0].status < 0) throw Object.assign(new Error("Já há uma importação ou sincronização em curso"), { code: "BUSY" });
+    try {
+      return await run();
+    } finally {
+      await sql`EXEC sys.sp_releaseapplock @Resource = 'ActiveSyncAI.import.suprides',
+        @LockOwner = 'Session', @DbPrincipal = 'public'`.execute(connection);
     }
   });
+}
 
-  insertMany(products);
+/** Uma onda da API é gravada atomicamente; uma chave repetida usa a última ocorrência. */
+export async function upsertProductsBatch(products: SupridesProduct[]): Promise<number> {
+  if (!products.length) return 0;
+  const payload = products.map(p => ({
+    ...p, images: p.images && typeof p.images !== "string" ? JSON.stringify(p.images) : p.images,
+  }));
+  await sql`
+    WITH incoming AS (
+      SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.sku ORDER BY CONVERT(int, j.[key]) DESC) AS seq
+      FROM OPENJSON(${JSON.stringify(payload)}) AS j
+      CROSS APPLY OPENJSON(j.value) WITH (
+        sku nvarchar(max), ean nvarchar(max), part_number nvarchar(max), brand nvarchar(max),
+        product_line nvarchar(max), family nvarchar(max), sub_family nvarchar(max), name nvarchar(max),
+        cost decimal(14,4), msrp decimal(14,4), stock int, stock_status nvarchar(max),
+        images nvarchar(max), weight float, color nvarchar(max), description nvarchar(max),
+        manufacturer nvarchar(max), short_description nvarchar(max)
+      ) AS p
+    )
+    MERGE products WITH (HOLDLOCK) AS target
+    USING (SELECT * FROM incoming WHERE seq = 1) AS src
+      ON target.sku = src.sku
+    WHEN MATCHED THEN UPDATE SET
+      ean = src.ean, part_number = src.part_number, brand = src.brand,
+      product_line = src.product_line, family = src.family, sub_family = src.sub_family,
+      name = src.name, cost = src.cost, msrp = src.msrp, stock = src.stock, stock_status = src.stock_status,
+      images_synced = CASE WHEN src.images COLLATE Latin1_General_100_BIN2 IS DISTINCT FROM target.images COLLATE Latin1_General_100_BIN2
+                            THEN 0 ELSE target.images_synced END,
+      images = src.images, weight = src.weight, color = src.color, description = src.description,
+      manufacturer = src.manufacturer, short_description = src.short_description,
+      removed_at = NULL, updated_at = SYSUTCDATETIME()
+    WHEN NOT MATCHED THEN INSERT
+      (sku, ean, part_number, brand, product_line, family, sub_family, name,
+       cost, msrp, stock, stock_status, images, weight, color, description, manufacturer, short_description)
+    VALUES (src.sku, src.ean, src.part_number, src.brand, src.product_line, src.family, src.sub_family, src.name,
+       src.cost, src.msrp, src.stock, src.stock_status, src.images, src.weight, src.color, src.description, src.manufacturer, src.short_description);
+  `.execute(getMssql());
   return products.length;
 }
 
-/**
- * Marca como retirados do fornecedor os SKUs ativos que não vieram na importação.
- * Não apaga: mantém os IDs Shopify para o sync os passar a draft.
- * Devolve quantos foram marcados agora.
- */
-export function markMissingAsRemoved(seenSkus: Set<string>): number {
-  const db = getSqlite();
-  const active = (db
-    .prepare("SELECT sku FROM suprides_products WHERE removed_at IS NULL")
-    .all() as { sku: string }[]).map(r => r.sku);
-  const missing = active.filter(sku => !seenSkus.has(sku));
-  if (missing.length === 0) return 0;
-
-  const mark = db.prepare(
-    `UPDATE suprides_products
-        SET removed_at = datetime('now'), stock = 0, stock_status = 'sem_stock'
-      WHERE sku = ? AND removed_at IS NULL`
-  );
-  db.transaction((skus: string[]) => { for (const s of skus) mark.run(s); })(missing);
-  return missing.length;
+export async function markMissingAsRemoved(seenSkus: Set<string>): Promise<number> {
+  const result = await sql`
+    UPDATE p SET removed_at = SYSUTCDATETIME(), stock = 0, stock_status = 'sem_stock'
+    FROM products p
+    WHERE p.removed_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM OPENJSON(${JSON.stringify([...seenSkus])}) seen WHERE seen.value = p.sku)
+  `.execute(getMssql());
+  return Number(result.numAffectedRows ?? 0n);
 }
 
-export function countActiveProducts(): number {
-  const db = getSqlite();
-  return (db
-    .prepare("SELECT COUNT(*) as n FROM suprides_products WHERE removed_at IS NULL")
-    .get() as { n: number }).n;
+export async function countActiveProducts(): Promise<number> {
+  const row = await products().where("removed_at", "is", null).select(sql<number>`COUNT(*)`.as("n")).executeTakeFirstOrThrow();
+  return row.n;
 }
 
-export function deleteProductBySku(sku: string): boolean {
-  const db = getSqlite();
-  const result = db
-    .prepare("DELETE FROM suprides_products WHERE sku = ?")
-    .run(sku);
-  return result.changes > 0;
+export async function deleteProductBySku(sku: string): Promise<boolean> {
+  const result = await getMssql().deleteFrom("products").where("sku", "=", sku).executeTakeFirst();
+  return result.numDeletedRows > 0n;
 }
 
-export function clearAllProducts(): number {
-  const db = getSqlite();
-  const result = db.prepare("DELETE FROM suprides_products").run();
-  return result.changes;
+export async function clearAllProducts(): Promise<number> {
+  const result = await getMssql().deleteFrom("products").executeTakeFirst();
+  return Number(result.numDeletedRows);
 }

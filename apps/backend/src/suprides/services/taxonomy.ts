@@ -34,7 +34,7 @@ export async function loadSupridesTaxonomy(): Promise<SupridesTaxonomy> {
     families,
     subFamilies,
     warnings: [
-      'Taxonomia derivada dos produtos disponíveis em cache/API; valores válidos sem produtos neste momento podem aparecer como unknown.',
+      'Taxonomia derivada dos produtos disponíveis no catálogo importado; valores válidos sem produtos neste momento podem aparecer como unknown.',
     ],
   };
 }

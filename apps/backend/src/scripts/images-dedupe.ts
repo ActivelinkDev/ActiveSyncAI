@@ -7,6 +7,8 @@
  *   npm run images:dedupe                  todos (ativos primeiro)
  */
 import "dotenv/config";
+import { withConnectionSettings } from "../suprides/repositories/store";
+import { closeMssql } from "../db/mssql";
 import { readAllProducts } from "../suprides/api/shopify-read";
 import { getProductImages, findDuplicateImages, dedupeProductImages } from "../suprides/api/shopify-api";
 
@@ -43,4 +45,4 @@ async function main() {
   console.log(`${ts()} — fim`);
 }
 
-main().catch(e => { console.error("ERRO:", e?.message ?? e); process.exit(1); });
+withConnectionSettings(main).catch(e => { console.error("ERRO:", e?.message ?? e); process.exitCode = 1; }).finally(closeMssql);

@@ -9,15 +9,15 @@ let _abortController = new AbortController();
 export function resetSyncAbort(): void { _abortController = new AbortController(); }
 export function abortSync(): void { _abortController.abort(); }
 
-export function getShopifyStore(): string {
-  return loadConnectionSettings().shopifyStore || process.env.SHOPIFY_STORE || '';
+export async function getShopifyStore(): Promise<string> {
+  return (await loadConnectionSettings()).shopifyStore || process.env.SHOPIFY_STORE || '';
 }
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 /** GraphQL com novas tentativas e gestão do limite de pontos (ver shopify-read.gql). */
 async function graphql(query: string, variables: Record<string, unknown> = {}): Promise<any> {
-  return gql(makeGraphqlClient(), query, variables);
+  return gql(await makeGraphqlClient(), query, variables);
 }
 
 const gid = (type: string, id: number | string) => `gid://shopify/${type}/${id}`;

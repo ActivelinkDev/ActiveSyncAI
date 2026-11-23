@@ -239,28 +239,156 @@ const migrations: Record<string, Migration> = {
       await sql`CREATE INDEX ix_security_audit_ts ON security_audit (ts)`.execute(db);
     },
   },
+  '0005_config_import_details': {
+    async up(db: Kysely<any>) {
+      await sql`ALTER TABLE sync_history ALTER COLUMN ran_at datetime2(3) NOT NULL`.execute(db);
+      await sql`ALTER TABLE sync_latest_products ALTER COLUMN synced_at datetime2(3) NULL`.execute(db);
+      await sql`ALTER TABLE collection_mapping ADD source_position int NULL`.execute(db);
+    },
+  },
+  '0006_sync_precision_and_order': {
+    async up(db: Kysely<any>) {
+      await sql`ALTER TABLE app_account ALTER COLUMN changed_at datetime2(3) NOT NULL`.execute(db);
+      await sql`ALTER TABLE products ALTER COLUMN shopify_synced_at datetime2(3) NULL`.execute(db);
+      await sql`IF COL_LENGTH('line_to_menu', 'position') IS NULL ALTER TABLE line_to_menu ADD position int NULL`.execute(db);
+      await sql`IF COL_LENGTH('collection_margins', 'position') IS NULL ALTER TABLE collection_margins ADD position int NULL`.execute(db);
+    },
+  },
+
+  // Um só fornecedor e nomes genéricos (19/11): sai a coluna supplier; price → cost,
+  // pvpr → msrp, cor → color; tag_groups nome/descricao/unidade → name/description/unit;
+  // product_tags_normalized.product_ref → sku.
+  '0007_single_supplier_generic_names': {
+    async up(db: Kysely<any>) {
+      // Travão: não deitar fora dados de outro fornecedor (o histórico de preços só tem 'outro' deduzido do SKU).
+      await sql`IF EXISTS (SELECT 1 FROM products WHERE supplier <> 'suprides')
+          OR EXISTS (SELECT 1 FROM line_mappings WHERE supplier <> 'suprides')
+          OR EXISTS (SELECT 1 FROM line_to_menu WHERE supplier <> 'suprides')
+          OR EXISTS (SELECT 1 FROM family_mappings WHERE supplier <> 'suprides')
+          OR EXISTS (SELECT 1 FROM collection_mapping WHERE supplier <> 'suprides')
+        THROW 51001, 'Há dados de outro fornecedor: rever antes de passar a um só fornecedor.', 1;`.execute(db);
+
+      // products: índice e valor por omissão da coluna supplier (nome gerado pelo SQL Server)
+      await sql`DROP INDEX ix_products_supplier ON products`.execute(db);
+      await sql`DECLARE @c sysname = (SELECT dc.name FROM sys.default_constraints dc
+          JOIN sys.columns col ON col.object_id = dc.parent_object_id AND col.column_id = dc.parent_column_id
+          WHERE dc.parent_object_id = OBJECT_ID('products') AND col.name = 'supplier');
+        DECLARE @drop nvarchar(400) = N'ALTER TABLE products DROP CONSTRAINT ' + QUOTENAME(@c);
+        IF @c IS NOT NULL EXEC sp_executesql @drop;`.execute(db);
+      await sql`ALTER TABLE products DROP COLUMN supplier`.execute(db);
+      await sql`EXEC sp_rename 'products.price', 'cost', 'COLUMN'`.execute(db);
+      await sql`EXEC sp_rename 'products.pvpr', 'msrp', 'COLUMN'`.execute(db);
+      await sql`EXEC sp_rename 'products.cor', 'color', 'COLUMN'`.execute(db);
+
+      // Mapeamentos: supplier fazia parte da chave primária
+      const keyed: [string, string, string][] = [
+        ['line_mappings', 'pk_line_mappings', 'product_line'],
+        ['line_to_menu', 'pk_line_to_menu', 'product_line'],
+        ['family_mappings', 'pk_family_mappings', 'product_line, family'],
+        ['collection_mapping', 'pk_collection_mapping', 'level, source_key, collection_id'],
+      ];
+      for (const [table, pk, cols] of keyed) {
+        await sql.raw(`ALTER TABLE ${table} DROP CONSTRAINT ${pk}`).execute(db);
+        await sql.raw(`ALTER TABLE ${table} DROP COLUMN supplier`).execute(db);
+        await sql.raw(`ALTER TABLE ${table} ADD CONSTRAINT ${pk} PRIMARY KEY (${cols})`).execute(db);
+      }
+      await sql`ALTER TABLE price_current DROP COLUMN supplier`.execute(db);
+      await sql`ALTER TABLE price_history DROP COLUMN supplier`.execute(db);
+
+      // Tags
+      await sql`EXEC sp_rename 'tag_groups.nome', 'name', 'COLUMN'`.execute(db);
+      await sql`EXEC sp_rename 'tag_groups.descricao', 'description', 'COLUMN'`.execute(db);
+      await sql`EXEC sp_rename 'tag_groups.unidade', 'unit', 'COLUMN'`.execute(db);
+      await sql`EXEC sp_rename 'uq_tag_groups_nome', 'uq_tag_groups_name', 'OBJECT'`.execute(db);
+      await sql`EXEC sp_rename 'product_tags_normalized.product_ref', 'sku', 'COLUMN'`.execute(db);
+    },
+  },
+
+  // Preço base (fora de campanha) calculado pelo motor de preço e gravado em cada sync real:
+  // é o preço que a loja tem sem promoção e o ponto de partida das campanhas (19/11).
+  // NULL = o sync não gere o preço deste produto (sem custo, fora do mapeamento sem stock).
+  '0008_products_base_price': {
+    async up(db: Kysely<any>) {
+      await sql`ALTER TABLE products ADD
+        base_price decimal(12,2) NULL,
+        base_margin_rule nvarchar(40) NULL,
+        base_price_at datetime2(3) NULL`.execute(db);
+    },
+  },
+
+  // Campanhas (promoções com a regra dos 30 dias). Datas em UTC.
+  // Os valores de cada produto (base, referência, promocional, custo) ficam fixados no início.
+  // applied_at / reverted_at: quando o preço promocional foi enviado para a loja e quando o
+  // preço base foi reposto — o temporizador reconcilia por estas colunas (idempotente).
+  '0009_campaigns': {
+    async up(db: Kysely<any>) {
+      await sql`CREATE TABLE campaigns (
+        id int IDENTITY(1,1) CONSTRAINT pk_campaigns PRIMARY KEY,
+        name nvarchar(200) NOT NULL,
+        status nvarchar(20) NOT NULL CONSTRAINT df_campaigns_status DEFAULT 'RASCUNHO'
+          CONSTRAINT ck_campaigns_status CHECK (status IN ('RASCUNHO','AGENDADA','ATIVA','TERMINADA','CANCELADA')),
+        discount_type nvarchar(10) NOT NULL CONSTRAINT ck_campaigns_discount_type CHECK (discount_type IN ('PERCENT','AMOUNT')),
+        discount_value decimal(12,2) NOT NULL CONSTRAINT ck_campaigns_discount_value CHECK (discount_value > 0),
+        starts_at datetime2(0) NOT NULL,
+        ends_at datetime2(0) NOT NULL,
+        notes nvarchar(1000) NULL,
+        created_at datetime2(0) NOT NULL CONSTRAINT df_campaigns_created DEFAULT SYSUTCDATETIME(),
+        scheduled_at datetime2(0) NULL,
+        started_at datetime2(0) NULL,
+        ended_at datetime2(0) NULL,
+        CONSTRAINT ck_campaigns_dates CHECK (ends_at > starts_at)
+      )`.execute(db);
+      await sql`CREATE INDEX ix_campaigns_status ON campaigns (status, starts_at, ends_at)`.execute(db);
+
+      await sql`CREATE TABLE campaign_products (
+        campaign_id int NOT NULL CONSTRAINT fk_campaign_products_campaign REFERENCES campaigns(id) ON DELETE CASCADE,
+        sku nvarchar(64) NOT NULL,
+        state nvarchar(20) NOT NULL CONSTRAINT df_campaign_products_state DEFAULT 'INCLUIDO'
+          CONSTRAINT ck_campaign_products_state CHECK (state IN ('INCLUIDO','BLOQUEADO','RETIRADO')),
+        block_reason nvarchar(20) NULL,
+        warning nvarchar(20) NULL,
+        override_type nvarchar(10) NULL CONSTRAINT ck_campaign_products_override CHECK (override_type IN ('PERCENT','AMOUNT')),
+        override_value decimal(12,2) NULL,
+        base_price decimal(12,2) NULL,
+        reference_price decimal(12,2) NULL,
+        promo_price decimal(12,2) NULL,
+        cost_at_start decimal(14,4) NULL,
+        applied_at datetime2(0) NULL,
+        reverted_at datetime2(0) NULL,
+        removed_at datetime2(0) NULL,
+        removed_reason nvarchar(40) NULL,
+        CONSTRAINT pk_campaign_products PRIMARY KEY (campaign_id, sku)
+      )`.execute(db);
+      await sql`CREATE INDEX ix_campaign_products_sku ON campaign_products (sku)`.execute(db);
+      await sql`CREATE INDEX ix_price_history_campaign ON price_history (campaign_id)`.execute(db);
+    },
+  },
 };
 
 /**
  * Registo próprio (tabela schema_migrations), em vez do Migrator do Kysely: o bloqueio dele
  * (sp_getapplock com @DbPrincipal = 'dbo') exige db_owner, e o utilizador da app só tem
- * datareader/datawriter/ddladmin. Cada migração corre numa transação.
+ * datareader/datawriter/ddladmin. O bloqueio em public serializa dois arranques na mesma BD.
  */
 export async function migrateMssql(db: Kysely<any> = getMssql()): Promise<{ applied: string[] }> {
-  await sql`IF OBJECT_ID('schema_migrations', 'U') IS NULL
-    CREATE TABLE schema_migrations (
-      name nvarchar(200) NOT NULL PRIMARY KEY,
-      applied_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME()
-    )`.execute(db);
-  const done = new Set((await db.selectFrom('schema_migrations').select('name').execute()).map((r: any) => r.name));
-  const applied: string[] = [];
-  for (const name of Object.keys(migrations).sort()) {
-    if (done.has(name)) continue;
-    await db.transaction().execute(async trx => {
+  return db.transaction().execute(async trx => {
+    await sql`DECLARE @result int;
+      EXEC @result = sys.sp_getapplock @Resource = N'ActiveSyncAI:schema_migrations',
+        @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 60000, @DbPrincipal = 'public';
+      IF @result < 0 THROW 51000, 'Não foi possível obter o bloqueio das migrações.', 1;`.execute(trx);
+    await sql`IF OBJECT_ID('schema_migrations', 'U') IS NULL
+      CREATE TABLE schema_migrations (
+        name nvarchar(200) NOT NULL PRIMARY KEY,
+        applied_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME()
+      )`.execute(trx);
+    const done = new Set((await trx.selectFrom('schema_migrations').select('name').execute()).map(r => r.name));
+    const applied: string[] = [];
+    for (const name of Object.keys(migrations).sort()) {
+      if (done.has(name)) continue;
       await migrations[name].up(trx);
       await trx.insertInto('schema_migrations').values({ name }).execute();
-    });
-    applied.push(name);
-  }
-  return { applied };
+      applied.push(name);
+    }
+    return { applied };
+  });
 }

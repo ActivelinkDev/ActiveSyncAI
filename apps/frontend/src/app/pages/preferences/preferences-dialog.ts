@@ -61,7 +61,7 @@ const API = '' + '/api';
 })
 export class PreferencesDialog implements OnInit {
   section: 'b2cSync' | 'words' | 'forcartags' | 'prompt' | 'ligacoes' = 'b2cSync';
-  skipMapped = localStorage.getItem('skipMapped') === 'true';
+  skipMapped = localStorage.getItem('skipMapped') !== 'false';
 
   // ===== Tags: Palavras excluídas =====
   excludedWords: string[] = [];
@@ -219,7 +219,7 @@ export class PreferencesDialog implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    this.skipMapped = localStorage.getItem('skipMapped') === 'true';
+    this.skipMapped = localStorage.getItem('skipMapped') !== 'false';
     this.http.get<{ createNewProducts?: boolean }>(`${API}/suprides/admin/settings`).subscribe({
       next: s => { this.createNewProducts = s.createNewProducts === true; },
       error: () => {},

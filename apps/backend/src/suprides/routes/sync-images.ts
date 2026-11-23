@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import { getSqlite } from '../../db/sqlite';
 import {
   getProductImages,
   addProductImages,
@@ -9,16 +8,9 @@ import {
   resetSyncAbort,
   abortSync,
 } from '../api/shopify-api';
-import { sendProductImages, checkSourceImage } from '../../services/images-sync';
+import { sendProductImages, checkSourceImage, loadImageRows, setImagesSynced, resetImageFlags } from '../../services/images-sync';
 
 const router = Router();
-
-interface ImageRow {
-  sku: string;
-  shopify_product_id: number | null;
-  images: string | null;
-  images_synced: number;
-}
 
 function parseImageUrls(json: string | null): string[] {
   if (!json) return [];
@@ -39,12 +31,9 @@ function dedupeKeepOrder(arr: string[]): string[] {
 
 // ── GET /api/suprides/sync-images/audit ──────────────────────────────────────
 // Diagnóstico sem chamar Shopify: conta produtos por categoria.
-router.get('/audit', (_req: Request, res: Response) => {
+router.get('/audit', async (_req: Request, res: Response) => {
   try {
-    const db = getSqlite();
-    const rows = db.prepare(
-      `SELECT sku, shopify_product_id, images, images_synced FROM suprides_products`
-    ).all() as ImageRow[];
+    const rows = await loadImageRows([], false);
 
     let total = rows.length;
     let inShopify = 0;
@@ -131,15 +120,7 @@ router.post('/', async (req: Request, res: Response) => {
   resetSyncAbort();
 
   try {
-    const db = getSqlite();
-    const baseSql =
-      `SELECT sku, shopify_product_id, images, images_synced
-         FROM suprides_products
-        WHERE shopify_product_id IS NOT NULL`;
-    const rows = (skuFilter.length
-      ? db.prepare(`${baseSql} AND sku IN (${skuFilter.map(() => '?').join(',')})`).all(...skuFilter)
-      : db.prepare(baseSql).all()
-    ) as ImageRow[];
+    const rows = await loadImageRows(skuFilter);
 
     type Task = { sku: string; productId: number; urls: string[] };
     const tasks: Task[] = [];
@@ -184,7 +165,7 @@ router.post('/', async (req: Request, res: Response) => {
               } else {
                 if (current.length) await deleteImageFiles(current.map(i => i.id));
                 await addProductImages(productId, ready);
-                db.prepare('UPDATE suprides_products SET images_synced = 0 WHERE sku = ?').run(sku);
+                await setImagesSynced(sku, false);
                 uploaded++;
                 send({ type: 'log', level: 'info', sku, msg: `[REPLACE] ${ready.length}/${urls.length} imagem(s) — confirmação no próximo envio` });
               }
@@ -239,22 +220,13 @@ router.post('/', async (req: Request, res: Response) => {
 // ── POST /api/suprides/sync-images/reset-flag ────────────────────────────────
 // Marca produtos como não-sincronizados para forçar re-upload na próxima sync principal.
 //   skus=A,B,C  (opcional) — se omitido, reseta todos
-router.post('/reset-flag', (req: Request, res: Response) => {
+router.post('/reset-flag', async (req: Request, res: Response) => {
   try {
-    const db = getSqlite();
     const skus: string[] = Array.isArray(req.body?.skus)
       ? req.body.skus.map(String).map((s: string) => s.trim()).filter(Boolean)
       : [];
 
-    let info;
-    if (skus.length) {
-      info = db.prepare(
-        `UPDATE suprides_products SET images_synced = 0 WHERE sku IN (${skus.map(() => '?').join(',')})`
-      ).run(...skus);
-    } else {
-      info = db.prepare(`UPDATE suprides_products SET images_synced = 0`).run();
-    }
-    res.json({ updated: info.changes });
+    res.json({ updated: await resetImageFlags(skus) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -289,12 +261,7 @@ router.post('/dedupe', async (req: Request, res: Response) => {
   resetSyncAbort();
 
   try {
-    const db = getSqlite();
-    const baseSql = `SELECT sku, shopify_product_id FROM suprides_products WHERE shopify_product_id IS NOT NULL`;
-    const rows = (skuFilter.length
-      ? db.prepare(`${baseSql} AND sku IN (${skuFilter.map(() => '?').join(',')})`).all(...skuFilter)
-      : db.prepare(baseSql).all()
-    ) as { sku: string; shopify_product_id: number }[];
+    const rows = await loadImageRows(skuFilter);
 
     send({ type: 'start', total: rows.length, dryRun, concurrency });
     if (!rows.length) {
@@ -310,7 +277,8 @@ router.post('/dedupe', async (req: Request, res: Response) => {
       while (!clientClosed) {
         const row = queue.shift();
         if (!row) break;
-        const { sku, shopify_product_id: productId } = row;
+        const { sku } = row;
+        const productId = row.shopify_product_id!;
         try {
           if (dryRun) {
             const current = await getProductImages(productId);

@@ -13,7 +13,6 @@ import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import {
   SupridesService,
-  type SupplierKey,
   type FamiliaTree, type SyncProgress, type ShopifyMenu, type MenuSyncNode,
   type ShopifyCollectionMapping,
   type SyncFamiliasResult,
@@ -65,17 +64,10 @@ type ReviewPhase = 'idle' | 'loading' | 'review' | 'progress' | 'done' | 'error'
   styleUrls: ['./suprides-mapeamento-dialog.scss']
 })
 export class SupridesMapeamentoDialog implements OnInit, OnDestroy {
-  private svcRoot = inject(SupridesService);
-  private svc = this.svcRoot.withSupplier('suprides');
+  private svc = inject(SupridesService);
   private dialogRef = inject(MatDialogRef<SupridesMapeamentoDialog>);
 
-  supplierIndex = 0;
-  readonly suppliers: { key: SupplierKey; label: string }[] = [
-    { key: 'suprides', label: 'Suprides' },
-  ];
-
-  get activeSupplier(): SupplierKey { return this.suppliers[this.supplierIndex].key; }
-  get activeSupplierLabel(): string { return this.suppliers[this.supplierIndex].label; }
+  readonly activeSupplierLabel = 'Suprides';
 
   loading = true;
   error = '';
@@ -197,16 +189,6 @@ export class SupridesMapeamentoDialog implements OnInit, OnDestroy {
   private progressInterval?: ReturnType<typeof setInterval>;
 
   ngOnInit(): void {
-    this.loadSupplierData();
-  }
-
-  onSupplierTabChange(index: number): void {
-    if (index === this.supplierIndex) return;
-    if (this.hasDraft && this.menuRows.length) {
-      this.svc.saveShopifyCollectionMapping(this._collectMapping()).subscribe();
-    }
-    this.supplierIndex = index;
-    this.svc = this.svcRoot.withSupplier(this.activeSupplier);
     this.loadSupplierData();
   }
 

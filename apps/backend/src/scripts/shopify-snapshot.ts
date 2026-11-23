@@ -8,8 +8,10 @@
  * Grava em <DATA_DIR>/snapshots/shopify-AAAAMMDD-HHMMSS.json (guarda as últimas 14).
  */
 import "dotenv/config";
+import { withConnectionSettings } from "../suprides/repositories/store";
+import { closeMssql } from "../db/mssql";
 import { takeSnapshot } from "../services/shopify-snapshot";
 
-takeSnapshot({ reason: "manual", onProgress: n => process.stdout.write(`\r${n} produtos lidos…`) })
+withConnectionSettings(() => takeSnapshot({ reason: "manual", onProgress: n => process.stdout.write(`\r${n} produtos lidos…`) }))
   .then(({ file, snapshot }) => console.log(`\nCópia guardada: ${file} (${snapshot.products.length} produtos)`))
-  .catch(e => { console.error("\nERRO:", e?.response?.data ?? e?.message ?? e); process.exit(1); });
+  .catch(e => { console.error("\nERRO:", e?.response?.data ?? e?.message ?? e); process.exitCode = 1; }).finally(closeMssql);

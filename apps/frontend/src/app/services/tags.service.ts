@@ -322,17 +322,17 @@ export class TagsService {
   }
 
   aiPopulateSubfamilia(grupo: string, familia: string, subfamilia: string, mode: 'local' | 'web' = 'local'): Observable<any> {
-    const skipMapped = localStorage.getItem('skipMapped') === 'true' ? 'true' : 'false';
+    const skipMapped = localStorage.getItem('skipMapped') !== 'false' ? 'true' : 'false';
     return this._sseObservable(`${this.TAGS}/ai-populate-subfamilia?${new URLSearchParams({ grupo, familia, subfamilia, mode, skipMapped })}`);
   }
 
   aiPopulateFamilia(grupo: string, familia: string, mode: 'local' | 'web' = 'local'): Observable<any> {
-    const skipMapped = localStorage.getItem('skipMapped') === 'true' ? 'true' : 'false';
+    const skipMapped = localStorage.getItem('skipMapped') !== 'false' ? 'true' : 'false';
     return this._sseObservable(`${this.TAGS}/ai-populate-familia?${new URLSearchParams({ grupo, familia, mode, skipMapped })}`);
   }
 
   aiPopulateGrupo(grupo: string, mode: 'local' | 'web' = 'local'): Observable<any> {
-    const skipMapped = localStorage.getItem('skipMapped') === 'true' ? 'true' : 'false';
+    const skipMapped = localStorage.getItem('skipMapped') !== 'false' ? 'true' : 'false';
     return this._sseObservable(`${this.TAGS}/ai-populate-grupo?${new URLSearchParams({ grupo, mode, skipMapped })}`);
   }
 

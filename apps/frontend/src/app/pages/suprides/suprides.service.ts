@@ -3,7 +3,6 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
 const API_ROOT = '' + '/api';
-export type SupplierKey = 'suprides';
 
 export interface FamiliaTree {
   product_line: string;
@@ -11,17 +10,6 @@ export interface FamiliaTree {
 }
 
 export type PriceMode = 'percentage' | 'fixed';
-
-export interface PricingRule { mode: PriceMode; marginValue: number; }
-export interface LinePricingRule  extends PricingRule { product_line: string; }
-export interface FamilyPricingRule extends PricingRule { family: string; }
-export interface SubfamiliaPricingRule extends PricingRule { subfamilia: string; }
-
-export interface Margins {
-  linePricingRules: LinePricingRule[];
-  familyPricingRules: FamilyPricingRule[];
-  pricingRules: SubfamiliaPricingRule[];
-}
 
 export interface Rounding { }
 export interface AdminSettings { ivaRate: number; rounding: Rounding; }
@@ -113,19 +101,9 @@ export interface SyncFamiliasAudit {
 
 @Injectable({ providedIn: 'root' })
 export class SupridesService {
-  private supplier: SupplierKey = 'suprides';
+  private readonly api = `${API_ROOT}/suprides`;
 
   constructor(private http: HttpClient) {}
-
-  withSupplier(supplier: SupplierKey): SupridesService {
-    const clone = new SupridesService(this.http);
-    clone.supplier = supplier;
-    return clone;
-  }
-
-  private get api(): string {
-    return `${API_ROOT}/${this.supplier}`;
-  }
 
   getFamilias(force = false): Observable<FamiliaTree[]> {
     return this.http.get<FamiliaTree[]>(`${this.api}/familias${force ? '?force=true' : ''}`);
@@ -139,13 +117,6 @@ export class SupridesService {
     return this.http.put<Mappings>(`${this.api}/mappings`, data);
   }
 
-  getMargins(): Observable<Margins> {
-    return this.http.get<Margins>(`${this.api}/margins`);
-  }
-
-  saveMargins(data: Margins): Observable<Margins> {
-    return this.http.put<Margins>(`${this.api}/margins`, data);
-  }
 
   getAdminSettings(): Observable<AdminSettings> {
     return this.http.get<AdminSettings>(`${this.api}/admin/settings`);

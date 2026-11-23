@@ -1,19 +1,16 @@
-import '../../test-support/temp-data-dir';
-import { test, before, after } from 'node:test';
+import { test } from 'node:test';
+import type { LivePromotion } from '../repositories/campaigns';
 import assert from 'node:assert/strict';
-import { writeConfig, removeTestDataDir } from '../../test-support/temp-data-dir';
 import { MENU, MAPPING } from '../../test-support/fixtures';
-import { ensureSupridesTable, ensureSupridesTagTables } from '../../db/migrate-suprides';
-import { getSqlite, closeSqlite } from '../../db/sqlite';
-import { upsertProductsBatch, type SupridesProduct } from '../../repositories/suprides-cache';
+import type { SupridesProduct } from '../types';
 import type { SnapshotProduct } from '../api/shopify-read';
+import type { loadSyncData } from '../repositories/sync-data';
 import { runFullShopifySync, type SyncPlanItem } from './sync';
 import { verifyPlan } from '../../services/sync-verify';
 
 const prod = (p: Partial<SupridesProduct> & { sku: string }): SupridesProduct => ({
-  ean: null, part_number: null, brand: 'Marca', product_line: 'ESCRITORIO', family: 'PAPEL', sub_family: null,
-  name: `Produto ${p.sku}`, price: 10, pvpr: null, stock: 20, stock_status: 'disponivel', images: null,
-  weight: null, cor: null, description: null, manufacturer: null, short_description: null,
+  brand: 'Marca', product_line: 'ESCRITORIO', family: 'PAPEL',
+  name: `Produto ${p.sku}`, price: '10', stock: '20', stock_status: 'disponivel',
   ...p,
 });
 
@@ -33,28 +30,28 @@ const SHOP: SnapshotProduct[] = [
   shop(9, 'OUTRO-FORNECEDOR'),
 ];
 
-before(() => {
-  ensureSupridesTable();
-  ensureSupridesTagTables();
-  writeConfig('menu-items.json', { nodes: MENU });
-  writeConfig('shopify-collection-mapping.json', MAPPING);
-  writeConfig('collection-margins.json', { rules: { '101': { mode: 'percentage', marginValue: 20 } } });
-  writeConfig('admin-settings.json', { ivaRate: 23, rounding: { aboveUnitTo999: true, belowUnitTo499: true } });
-  upsertProductsBatch([
-    prod({ sku: 'UPD', price: 10, pvpr: 30 }),                     // atualiza: 10 / 0,8 × 1,23 = 15,375 → 15,49
+const products = [
+    prod({ sku: 'UPD', price: '10', pvpr: '30' }),                     // atualiza: 10 / 0,8 × 1,23 = 15,375 → 15,49
     // NEW/NOCOST-NEW numa linha com L2: só-L1 não chega para entrar um produto que ainda não está na loja
-    prod({ sku: 'NEW', product_line: 'ACESSORIOS', price: 5 }),    // não existe na loja → skip-new
-    prod({ sku: 'NOCOST', price: null }),                          // existe, sem custo → draft-no-cost
-    prod({ sku: 'NOCOST-NEW', product_line: 'ACESSORIOS', price: null }), // não existe, sem custo → skip-no-cost
-    prod({ sku: 'UNMAPPED-SEM-STOCK', product_line: 'LINHA X', stock: 0, stock_status: 'sem_stock' }), // → draft-unmapped
-    prod({ sku: 'UNMAPPED-ATIVO', product_line: null, family: null }), // sem linha → preço com a margem das coleções da loja
-    prod({ sku: 'BELOW', product_line: 'ACESSORIOS', price: 41.4 }), // sem margem: 41,4 × 1,23 = 50,92 → 50,90 < custo+IVA
-  ]);
-});
+    prod({ sku: 'NEW', product_line: 'ACESSORIOS', price: '5' }),    // não existe na loja → skip-new
+    prod({ sku: 'NOCOST', price: undefined }),                          // existe, sem custo → draft-no-cost
+    prod({ sku: 'NOCOST-NEW', product_line: 'ACESSORIOS', price: undefined }), // não existe, sem custo → skip-no-cost
+    prod({ sku: 'UNMAPPED-SEM-STOCK', product_line: 'LINHA X', stock: '0', stock_status: 'sem_stock' }), // → draft-unmapped
+    prod({ sku: 'UNMAPPED-ATIVO', product_line: undefined, family: undefined }), // sem linha → preço com a margem das coleções da loja
+    prod({ sku: 'BELOW', product_line: 'ACESSORIOS', price: '41.4' }), // sem margem: 41,4 × 1,23 = 50,92 → 50,90 < custo+IVA → 51,90
+];
 
-after(() => { closeSqlite(); removeTestDataDir(); });
-
-const run = () => runFullShopifySync({ dryRun: true, readShop: async () => SHOP }) as Promise<any>;
+type StoredStates = Awaited<ReturnType<typeof loadSyncData>>['states'];
+const run = (createNewProducts = false, states: StoredStates = [], shop = SHOP, promotions = new Map<string, LivePromotion>()) => runFullShopifySync({
+  dryRun: true,
+  readShop: async () => shop,
+  readPromotions: async () => promotions,
+  readLocal: async () => ({
+    settings: { ivaRate: 23, rounding: { aboveUnitTo999: true, belowUnitTo499: true }, createNewProducts },
+    collMap: MAPPING, menu: MENU, collMargins: { rules: { '101': { mode: 'percentage', marginValue: 20 } } },
+    products, states, tags: [],
+  }),
+}) as Promise<any>;
 const bySku = (plan: SyncPlanItem[]) => new Map(plan.map(i => [i.sku, i]));
 
 test('dry-run: decisão por produto', async () => {
@@ -66,7 +63,7 @@ test('dry-run: decisão por produto', async () => {
   assert.equal(upd.shopifyProductId, 1);
   assert.equal(upd.status, 'active');
   assert.equal(upd.price, '15.49');
-  assert.equal(upd.compareAtPrice, '30.00');
+  assert.equal(upd.compareAtPrice, null); // PVPR 30 nunca vai como preço riscado (Omnibus, 19/11)
   assert.equal(upd.cost, '10.00');
   assert.equal(upd.marginRule, 'percentage:20');
   assert.deepEqual(upd.collectionIds, ['101']);
@@ -93,28 +90,30 @@ test('dry-run: decisão por produto', async () => {
 test('dry-run: verificações do resumo', async () => {
   const r = await run();
   assert.equal(r.checks.noMarginRule, 1);           // BELOW
-  assert.equal(r.checks.belowCostVat, 1);
-  assert.equal(r.checks.belowCostVatSample[0].sku, 'BELOW');
+  // BELOW: 41,4 × 1,23 = 50,92 → 50,90 ficaria abaixo de custo + IVA → sobe para 51,90
+  assert.equal(r.checks.belowCostVat, 0);
+  assert.equal(bySku(r.plan).get('BELOW')?.price, '51.90');
   // Ativos na loja em que o sync não toca: só o produto de outro fornecedor.
   assert.equal(r.checks.untouchedActive, 1);
   assert.deepEqual(r.checks.untouchedActiveSample.map((x: any) => x.sku), ['OUTRO-FORNECEDOR']);
 });
 
-test('dry-run não escreve IDs no SQLite', async () => {
-  await run();
-  const n = (getSqlite().prepare('SELECT COUNT(*) n FROM suprides_products WHERE shopify_product_id IS NOT NULL').get() as any).n;
-  assert.equal(n, 0);
+test('o dry-run concilia bigint do SQL com o snapshot sem alterar os IDs guardados', async () => {
+  const id = 820000000001;
+  const shop = SHOP.map(p => p.sku === 'UPD' ? { ...p, productId: id } : p);
+  const states: StoredStates = [{
+    sku: 'UPD', shopify_product_id: String(id - 1), shopify_variant_id: '10', shopify_inventory_item_id: '100',
+    shopify_content_hash: null, shopify_node_id: null, images_synced: 0,
+  }];
+  const r = await run(false, states, shop);
+  assert.equal(bySku(r.plan).get('UPD')?.shopifyProductId, id);
+  assert.equal(states[0].shopify_product_id, String(id - 1));
 });
 
 test('createNewProducts ligado → o produto novo passa a create', async () => {
-  writeConfig('admin-settings.json', { ivaRate: 23, rounding: {}, createNewProducts: true });
-  try {
-    const r = await run();
-    assert.equal(bySku(r.plan).get('NEW')?.action, 'create');
-    assert.equal(r.summary.skipNew, 0);
-  } finally {
-    writeConfig('admin-settings.json', { ivaRate: 23, rounding: {} });
-  }
+  const r = await run(true);
+  assert.equal(bySku(r.plan).get('NEW')?.action, 'create');
+  assert.equal(r.summary.skipNew, 0);
 });
 
 test('sync:verify: loja igual ao plano → sem diferenças; preço errado → diferença', async () => {
@@ -153,4 +152,18 @@ test('sync:verify: produto ativo não publicado na loja → diferença', async (
     : p));
   const v = verifyPlan(plan.filter(i => i.sku === 'UPD'), after);
   assert.deepEqual(v.mismatches.map(m => m.field), ['published']);
+});
+
+test('dry-run: produto em promoção → preço promocional e riscado = referência dos 30 dias', async () => {
+  // UPD: base 15,49 (ver acima). Promoção fixada: 13,94 com referência 15,49.
+  const promos = new Map<string, LivePromotion>([['UPD', { campaignId: 7, promoPrice: 13.94, referencePrice: 15.49 }]]);
+  const upd = bySku((await run(false, [], SHOP, promos)).plan).get('UPD')!;
+  assert.equal(upd.price, '13.94');
+  assert.equal(upd.compareAtPrice, '15.49');
+
+  // O base desceu abaixo do promocional: cobra-se o base; sem riscado se já não houver redução face à referência.
+  const promosAlto = new Map<string, LivePromotion>([['UPD', { campaignId: 7, promoPrice: 16.0, referencePrice: 15.49 }]]);
+  const upd2 = bySku((await run(false, [], SHOP, promosAlto)).plan).get('UPD')!;
+  assert.equal(upd2.price, '15.49');
+  assert.equal(upd2.compareAtPrice, null);
 });

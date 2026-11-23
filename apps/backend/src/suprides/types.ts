@@ -58,6 +58,8 @@ export interface AdminSettings {
   ivaRate: number;
   rounding: Rounding;
   autoPublishPublicMenu?: boolean;
+  publicMenuHandle?: string;
+  publicMenuTitle?: string;
   /** Criar na Shopify produtos que ainda lá não existem. Por omissão false: o sync só atualiza. */
   createNewProducts?: boolean;
 }

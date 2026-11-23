@@ -13,11 +13,35 @@
  * que a Suprides já tem a foto verdadeira; ícones já guardados na loja são apagados e a foto
  * é reenviada quando existir.
  */
-import { getSqlite } from '../db/sqlite';
+import { sql } from 'kysely';
+import { getMssql } from '../db/mssql';
 import {
   getProductImages, addProductImages, deleteProductImage, deleteImageFiles, imageKeyFromUrl, dedupeImageUrls,
   isPlaceholderImage, PLACEHOLDER_SIZE, type ShopifyImage,
 } from '../suprides/api/shopify-api';
+
+/** O driver devolve bigint como texto. A API Shopify espera o ID numérico. */
+export async function loadImageRows(skus: string[] = [], linkedOnly = true) {
+  let query = getMssql().selectFrom('products').select(['sku', 'images', 'images_synced', 'shopify_product_id'])
+    .orderBy('id');
+  if (linkedOnly) query = query.where('shopify_product_id', 'is not', null);
+  if (skus.length) query = query.where('sku', 'in', sql<string>`(SELECT value FROM OPENJSON(${JSON.stringify(skus)}))`);
+  return (await query.execute()).map(r => ({
+    sku: String(r.sku), images: r.images as string | null, images_synced: Number(r.images_synced),
+    shopify_product_id: r.shopify_product_id == null ? null : Number(r.shopify_product_id),
+  }));
+}
+
+export async function setImagesSynced(sku: string, synced: boolean) {
+  await getMssql().updateTable('products').set({ images_synced: synced ? 1 : 0 })
+    .where('sku', '=', sku).execute();
+}
+
+export async function resetImageFlags(skus: string[]) {
+  let query = getMssql().updateTable('products').set({ images_synced: 0 });
+  if (skus.length) query = query.where('sku', 'in', sql<string>`(SELECT value FROM OPENJSON(${JSON.stringify(skus)}))`);
+  return Number((await query.executeTakeFirstOrThrow()).numUpdatedRows);
+}
 
 export interface ImageTarget { sku: string; productId: number; urls: string[] }
 
@@ -111,10 +135,9 @@ export async function sendProductImages(t: ImageTarget, opts: {
   dryRun?: boolean; checkSource?: (url: string) => Promise<'real' | 'placeholder' | 'error'>;
 } = {}): Promise<{ complete: boolean; added: number; placeholdersRemoved: number; notReadyAtSource: number }> {
   const checkSource = opts.checkSource ?? checkSourceImage;
-  const db = getSqlite();
   const plan = planImages(t.urls, await getProductImages(t.productId));
   if (plan.complete) {
-    if (!opts.dryRun) db.prepare('UPDATE suprides_products SET images_synced = 1 WHERE sku = ?').run(t.sku);
+    if (!opts.dryRun) await setImagesSynced(t.sku, true);
     return { complete: true, added: 0, placeholdersRemoved: 0, notReadyAtSource: 0 };
   }
   // Só se envia o que a Suprides já tem como foto verdadeira.
@@ -124,7 +147,7 @@ export async function sendProductImages(t: ImageTarget, opts: {
     if ((await checkSource(u)) === 'real') ready.push(u); else notReadyAtSource++;
   }
   if (!opts.dryRun) {
-    db.prepare('UPDATE suprides_products SET images_synced = 0 WHERE sku = ?').run(t.sku);
+    await setImagesSynced(t.sku, false);
     for (const id of plan.removeFailed) await deleteProductImage(t.productId, id);
     if (plan.removePlaceholders.length) await deleteImageFiles(plan.removePlaceholders);
     if (ready.length) await addProductImages(t.productId, ready);
@@ -139,7 +162,6 @@ export async function runImagesSync(targets: ImageTarget[], opts: {
 } = {}): Promise<ImagesRunResult> {
   const log = opts.log ?? (() => {});
   const checkSource = opts.checkSource ?? checkSourceImage;
-  const markDone = getSqlite().prepare('UPDATE suprides_products SET images_synced = 1 WHERE sku = ?');
   const res: ImagesRunResult = {
     checked: 0, alreadyComplete: 0, sent: 0, imagesAdded: 0, confirmed: 0, failedImages: 0, stillProcessing: 0,
     placeholdersRemoved: 0, notReadyAtSource: 0, errors: [],
@@ -183,7 +205,7 @@ export async function runImagesSync(targets: ImageTarget[], opts: {
           res.placeholdersRemoved += placeholders.length;
           continue;                              // fica images_synced = 0 → nova tentativa noutra execução
         }
-        if (planImages(t.urls, current).complete) { markDone.run(t.sku); res.confirmed++; }
+        if (planImages(t.urls, current).complete) { await setImagesSynced(t.sku, true); res.confirmed++; }
         else next.push(t);
       } catch (e: any) {
         res.errors.push({ sku: t.sku, error: e?.message ?? String(e) });
