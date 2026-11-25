@@ -81,7 +81,10 @@ function Add-UserRight([string]$right, [string]$sid) {
     $inf = Join-Path $tmp 'new.inf'
     @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1', '[Privilege Rights]', "$right = $new") |
       Set-Content -Path $inf -Encoding Unicode
-    Invoke-Checked "secedit /configure ($right)" { secedit /configure /db (Join-Path $tmp 'x.sdb') /cfg $inf /areas USER_RIGHTS /quiet | Out-Null }
+    # Num controlador de domínio o secedit devolve 1 quando a política de grupo define este
+    # direito. Não é fatal: quem decide é o Test-UserRight a seguir ao gpupdate.
+    secedit /configure /db (Join-Path $tmp 'x.sdb') /cfg $inf /areas USER_RIGHTS /quiet | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Todo "secedit não aplicou $right localmente (código $LASTEXITCODE; normal se a política de grupo o definir)."; return $false }
     return $true
   } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 }
