@@ -76,7 +76,7 @@ function Add-UserRight([string]$right, [string]$sid) {
     $line = (Get-Content $cfg) | Where-Object { $_ -match "^$right\s*=" } | Select-Object -First 1
     $current = @()
     if ($line) { $current = ($line -split '=', 2)[1].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ } }
-    if ($current -contains "*$sid") { return $false }
+    if (@($current | ForEach-Object { ConvertTo-Sid $_ }) -contains $sid) { return $false }
     $new = @($current + "*$sid") -join ','
     $inf = Join-Path $tmp 'new.inf'
     @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1', '[Privilege Rights]', "$right = $new") |
@@ -89,12 +89,21 @@ function Add-UserRight([string]$right, [string]$sid) {
   } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
+# O secedit escreve cada conta como *SID ou pelo nome (ex.: DOMINIO\conta, quando vem da
+# política de grupo). Converte tudo para SID antes de comparar.
+function ConvertTo-Sid([string]$entry) {
+  if ($entry.StartsWith('*')) { return $entry.Substring(1) }
+  try { return (New-Object Security.Principal.NTAccount($entry)).Translate([Security.Principal.SecurityIdentifier]).Value } catch { return $entry }
+}
+
 function Test-UserRight([string]$right, [string]$sid) {
   $tmp = Join-Path $env:TEMP ("asai-secedit-" + [guid]::NewGuid() + '.inf')
   try {
     secedit /export /cfg $tmp /areas USER_RIGHTS /quiet | Out-Null
     $line = (Get-Content $tmp) | Where-Object { $_ -match "^$right\s*=" } | Select-Object -First 1
-    return [bool]($line -and ($line -split '=', 2)[1] -match [regex]::Escape("*$sid"))
+    if (-not $line) { return $false }
+    $sids = ($line -split '=', 2)[1].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ } | ForEach-Object { ConvertTo-Sid $_ }
+    return [bool]($sids -contains $sid)
   } finally { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
 }
 
