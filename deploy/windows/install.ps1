@@ -189,15 +189,18 @@ if (-not $user) {
 A conta $($domain.NetBIOSName)\$ServiceUser não existe. Criá-la no AD (Utilizadores e Computadores do AD):
   - só no grupo Domain Users (sem administração);
   - "A palavra-passe nunca expira" e "O utilizador não pode alterar a palavra-passe";
-  - palavra-passe guardada no cofre (é pedida a seguir, uma vez).
+  - palavra-passe guardada no cofre (pedida na consola a seguir, uma vez).
 Depois voltar a correr este script (ou indicar outra conta com -ServiceUser).
 "@
 }
 if (-not $user.Enabled) { throw "A conta $ServiceUser está desativada no AD." }
 if ($user.MemberOf.Count -gt 0) { Write-Todo "A conta pertence a grupos além de Domain Users: $($user.MemberOf -join '; '). Retirar se não forem precisos." }
 $userSid = $user.SID.Value
-$cred = Get-Credential -UserName "$($domain.NetBIOSName)\$ServiceUser" -Message 'Palavra-passe da conta do serviço (só para a associar ao serviço; não fica gravada em ficheiro)'
-if (-not $cred) { throw 'Cancelado.' }
+# Pedido na consola (a janela do Get-Credential nem sempre aparece em sessões RDP/servidor).
+$secure = Read-Host -AsSecureString "Palavra-passe de $($domain.NetBIOSName)\$ServiceUser (só para a associar ao serviço; não fica gravada em ficheiro)"
+if (-not $secure -or $secure.Length -eq 0) { throw 'Palavra-passe vazia: cancelado.' }
+$cred = New-Object System.Management.Automation.PSCredential("$($domain.NetBIOSName)\$ServiceUser", $secure)
+$secure = $null
 # Confirmar a palavra-passe antes de a dar ao serviço.
 Add-Type -AssemblyName System.DirectoryServices.AccountManagement
 $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('Domain', $domain.DNSRoot)
